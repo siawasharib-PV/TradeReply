@@ -1,1 +1,1 @@
-web: python3 -m uvicorn src.app:app --host 0.0.0.0 --port $PORT
+web: cd /app && PYTHONPATH=/app/src python3 -m uvicorn app:app --host 0.0.0.0 --port $PORT
