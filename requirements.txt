@@ -1,26 +1,15 @@
-# TradeReply Requirements
-# Phase 1: Local development scaffold
-
-# Web Framework
-fastapi==0.109.2
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-
-# AI/LLM
-google-generativeai==0.3.0
-
-# SMS/Twilio
-twilio==8.10.0
-
-# Database (SQLite is built-in)
-# sqlite3 (included with Python)
-
-# Utilities
+# Core Dependencies - Updated for Python 3.13 compatibility
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.10.0
 python-dotenv==1.0.0
-requests==2.31.0
+pyyaml==6.0.3
 
-# Development
-pytest==7.4.3
-pytest-asyncio==0.23.2
-black==23.12.1
-flake8==6.1.0
+# AI Integration
+google-generativeai==0.8.0
+
+# SMS Integration  
+twilio==9.0.0
+
+# HTTP Client
+requests==2.32.0
