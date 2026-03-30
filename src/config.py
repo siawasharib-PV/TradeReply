@@ -66,15 +66,14 @@ class Config:
             issues.append("TRADEREPLY_DB_PATH not set")
 
         if env == "production":
-            required = {
+            # Phase 1: Core requirements (Twilio + Gemini only)
+            required_phase1 = {
                 "TWILIO_ACCOUNT_SID": cls.TWILIO_ACCOUNT_SID,
                 "TWILIO_AUTH_TOKEN": cls.TWILIO_AUTH_TOKEN,
                 "TWILIO_FROM_NUMBER": cls.TWILIO_FROM_NUMBER,
                 "GEMINI_API_KEY": cls.GEMINI_API_KEY,
-                "GOOGLE_CREDENTIALS_PATH": cls.GOOGLE_CREDENTIALS_PATH,
-                "GOOGLE_BUSINESS_ACCOUNT_ID": cls.GOOGLE_BUSINESS_ACCOUNT_ID,
             }
-            missing = [key for key, value in required.items() if not value]
+            missing = [key for key, value in required_phase1.items() if not value]
             if missing:
                 issues.append(
                     "Missing required production environment variables: "
@@ -88,10 +87,13 @@ class Config:
             if cls.DEBUG:
                 issues.append("DEBUG must be false in production")
 
-            if cls.GOOGLE_CREDENTIALS_PATH and not Path(cls.GOOGLE_CREDENTIALS_PATH).exists():
-                issues.append(
-                    f"GOOGLE_CREDENTIALS_PATH does not exist: {cls.GOOGLE_CREDENTIALS_PATH}"
-                )
+            # Phase 2: Google Business Profile (optional for now)
+            # Only validate if both are set (indicates Phase 2 is enabled)
+            if cls.GOOGLE_CREDENTIALS_PATH and cls.GOOGLE_BUSINESS_ACCOUNT_ID:
+                if not Path(cls.GOOGLE_CREDENTIALS_PATH).exists():
+                    issues.append(
+                        f"GOOGLE_CREDENTIALS_PATH does not exist: {cls.GOOGLE_CREDENTIALS_PATH}"
+                    )
 
             if issues:
                 raise ConfigError(" | ".join(issues))
