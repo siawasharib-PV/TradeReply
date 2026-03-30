@@ -95,12 +95,43 @@ def build_sms_approval_message(
     """
     
     stars = "⭐" * rating.value
+    star_display = f"{rating.value}-star" if rating.value != 1 else "1-star"
     
-    message = f"""New {rating.value}-star review from {reviewer_name}:
-"{review_text[:100]}{'...' if len(review_text) > 100 else ''}"
+    message = f"""New {star_display} review {stars} from {reviewer_name}:
+"{review_text[:90]}{'...' if len(review_text) > 90 else ''}"
 
-Draft reply: "{draft_response[:120]}{'...' if len(draft_response) > 120 else ''}"
+Draft reply: "{draft_response[:110]}{'...' if len(draft_response) > 110 else ''}"
 
 Reply YES to post, NO to skip."""
+    
+    return message
+
+
+def build_sms_confirmation_message(
+    approved: bool,
+    reviewer_name: str,
+    rating: StarRating,
+) -> str:
+    """
+    Build confirmation SMS to send to business owner after they approve/reject.
+    
+    Args:
+        approved: True if approved, False if rejected
+        reviewer_name: Name of the reviewer
+        rating: Star rating of the review
+        
+    Returns:
+        SMS confirmation message
+    """
+    stars = "⭐" * rating.value
+    
+    if approved:
+        message = f"""✅ Done! Your reply to {reviewer_name}'s {rating.value}-star review {stars} has been approved and is ready to post.
+
+Thank you for using TradeReply!"""
+    else:
+        message = f"""👋 No problem! Reply to {reviewer_name}'s {rating.value}-star review {stars} has been skipped.
+
+You can always post a manual reply later. Thank you for using TradeReply!"""
     
     return message

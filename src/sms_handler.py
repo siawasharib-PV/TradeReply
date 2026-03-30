@@ -130,6 +130,23 @@ class SMSHandler:
         else:
             return None
 
+    def send_sms(
+        self,
+        recipient_phone: str,
+        message: str,
+    ) -> dict:
+        """
+        Send SMS to a recipient.
+        
+        Args:
+            recipient_phone: Phone number to send to (e.g., "+61402707102")
+            message: SMS message body
+            
+        Returns:
+            Dict with 'success', 'message_sid' (if sent), and 'log' entry
+        """
+        return self.send_approval_request(recipient_phone, message)
+
     def log_sms_interaction(
         self,
         direction: str,  # "outbound" or "inbound"

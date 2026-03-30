@@ -18,7 +18,7 @@ from config import Config, get_config
 from db_helper import DatabaseHelper
 from ai_integration import AIHandler
 from sms_handler import SMSHandler
-from prompts import build_sms_approval_message
+from prompts import build_sms_approval_message, build_sms_confirmation_message
 from models import (
     Business,
     Review,
@@ -575,6 +575,25 @@ async def twilio_inbound_webhook(
             payload={"from": normalized_phone, "body": response_text, "message_sid": MessageSid},
         )
         logger.info(f"Approval {approval.id} updated to {new_status.value} via inbound Twilio SMS")
+
+        # Send confirmation SMS to business owner
+        try:
+            draft = db.get_draft_response(approval.draft_response_id)
+            if draft:
+                review = db.get_review(draft.review_id)
+                if review:
+                    confirmation_message = build_sms_confirmation_message(
+                        approved=parsed,
+                        reviewer_name=review.reviewer_name,
+                        rating=review.rating,
+                    )
+                    sms_handler.send_sms(
+                        recipient_phone=normalized_phone,
+                        message=confirmation_message,
+                    )
+                    logger.info(f"Confirmation SMS sent to {normalized_phone}")
+        except Exception as confirm_error:
+            logger.warning(f"Failed to send confirmation SMS: {confirm_error}")
 
         if parsed:
             return "Approved. TradeReply recorded your YES response."
