@@ -30,6 +30,10 @@ class DatabaseHelper:
 
     def connect(self):
         """Open database connection"""
+        # Create parent directory if it doesn't exist (for paths like data/tradereply.db)
+        db_path = Path(self.db_path)
+        if db_path.parent and not db_path.parent.exists():
+            db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
