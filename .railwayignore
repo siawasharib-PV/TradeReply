@@ -1,0 +1,11 @@
+# .railwayignore
+# Ignore sensitive files and large directories from deployment
+.env.production
+.env
+virtualenv/
+virtualenvs/
+venv/
+__pycache__/
+*.pyc
+*.sqlite3
+data/
