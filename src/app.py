@@ -1000,6 +1000,70 @@ async def ops_dashboard():
     return html
 
 
+@app.get("/businesses/{business_id}/debug-google")
+async def debug_google_api(business_id: str):
+    """Debug endpoint: Test Google API access and list available accounts/locations"""
+    try:
+        from google_client import GoogleBusinessClient
+        
+        business = db.get_business(business_id)
+        if not business:
+            raise HTTPException(status_code=404, detail="Business not found")
+        
+        if not business.google_refresh_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Google not connected. Complete OAuth flow first."
+            )
+        
+        client = GoogleBusinessClient(
+            client_id=config.GOOGLE_CLIENT_ID,
+            client_secret=config.GOOGLE_CLIENT_SECRET,
+            redirect_uri=config.GOOGLE_REDIRECT_URI,
+            refresh_token=business.google_refresh_token,
+        )
+        
+        result = {
+            "business_id": business_id,
+            "has_refresh_token": bool(business.google_refresh_token),
+            "google_location_id": business.google_location_id,
+            "accounts": [],
+            "locations": [],
+            "errors": [],
+        }
+        
+        # Try to get accounts
+        try:
+            accounts = client.get_accounts()
+            result["accounts"] = [
+                {"name": a.get("name"), "accountName": a.get("accountName")}
+                for a in accounts
+            ]
+            
+            # Try to get locations for first account
+            if accounts:
+                try:
+                    locations = client.get_locations(accounts[0]["name"])
+                    result["locations"] = [
+                        {
+                            "name": loc.get("name"),
+                            "title": loc.get("title"),
+                        }
+                        for loc in locations
+                    ]
+                except Exception as loc_err:
+                    result["errors"].append(f"get_locations: {str(loc_err)}")
+                    
+        except Exception as acc_err:
+            result["errors"].append(f"get_accounts: {str(acc_err)}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Debug Google API error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/debug/reviews/{business_id}")
 async def debug_business_reviews(business_id: str):
     """Debug endpoint: Get all reviews for a business"""
