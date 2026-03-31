@@ -685,8 +685,9 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
         business_id = None
         business_name = "My Business"
         sms_recipient = None
+        location_id = None
         if state:
-            # Parse state params like "business_id=xxx&name=MyBiz&phone=+61..."
+            # Parse state params like "business_id=xxx&name=MyBiz&phone=+61...&location_id=accounts/..."
             params = {}
             for pair in state.split("&"):
                 if "=" in pair:
@@ -695,6 +696,7 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
             business_id = params.get("business_id")
             business_name = params.get("name", "My Business")
             sms_recipient = params.get("phone")
+            location_id = params.get("location_id")
         
         # Exchange code for tokens
         client = GoogleBusinessClient(
@@ -705,22 +707,23 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
         
         tokens = client.exchange_code(code)
         
-        # Auto-discover accounts and locations
-        discovered_location = None
+        # Auto-discover accounts and locations (try, but prefer manual entry)
+        discovered_location = location_id  # Start with manual entry if provided
         discovered_location_name = None
-        try:
-            accounts = client.get_accounts()
-            if accounts:
-                first_account = accounts[0]
-                account_name = first_account.get("name", "")  # e.g., "accounts/123456"
-                locations = client.get_locations(account_name)
-                if locations:
-                    first_location = locations[0]
-                    discovered_location = first_location.get("name")  # e.g., "accounts/123/locations/456"
-                    discovered_location_name = first_location.get("title", "Unknown Location")
-                    logger.info(f"Auto-discovered location: {discovered_location} ({discovered_location_name})")
-        except Exception as discovery_error:
-            logger.warning(f"Could not auto-discover locations: {discovery_error}")
+        if not discovered_location:
+            try:
+                accounts = client.get_accounts()
+                if accounts:
+                    first_account = accounts[0]
+                    account_name = first_account.get("name", "")  # e.g., "accounts/123456"
+                    locations = client.get_locations(account_name)
+                    if locations:
+                        first_location = locations[0]
+                        discovered_location = first_location.get("name")  # e.g., "accounts/123/locations/456"
+                        discovered_location_name = first_location.get("title", "Unknown Location")
+                        logger.info(f"Auto-discovered location: {discovered_location} ({discovered_location_name})")
+            except Exception as discovery_error:
+                logger.warning(f"Could not auto-discover locations: {discovery_error}")
         
         # Create business if needed
         if not business_id:
@@ -750,13 +753,14 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
             message="Google OAuth completed successfully",
             payload={
                 "has_refresh_token": bool(tokens.get("refresh_token")),
-                "auto_discovered_location": discovered_location,
+                "google_location_id": discovered_location,
                 "location_name": discovered_location_name,
+                "manual_location_provided": bool(location_id),
             },
         )
         
         # Show success page with location info
-        location_display = discovered_location_name or "Location configured"
+        location_display = discovered_location_name or ("Location configured" if discovered_location else "Location not set - add manually")
         return HTMLResponse(
             content=f"""
             <html>
@@ -1104,7 +1108,7 @@ async def onboard_page():
                 background: #1e293b;
                 border-radius: 16px;
                 padding: 40px;
-                max-width: 480px;
+                max-width: 520px;
                 width: 100%;
                 box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             }
@@ -1164,6 +1168,34 @@ async def onboard_page():
             }
             .check { color: #22c55e; font-size: 18px; }
             .note { font-size: 13px; color: #64748b; text-align: center; margin-top: 16px; }
+            
+            .help-box {
+                background: #0f172a;
+                border: 1px solid #334155;
+                border-radius: 10px;
+                padding: 16px;
+                margin-top: 8px;
+                font-size: 13px;
+                color: #94a3b8;
+            }
+            .help-box code {
+                background: #1e293b;
+                padding: 2px 6px;
+                border-radius: 4px;
+                color: #93c5fd;
+                font-size: 12px;
+            }
+            .help-box a { color: #60a5fa; }
+            .toggle-help {
+                background: none;
+                border: none;
+                color: #60a5fa;
+                font-size: 13px;
+                cursor: pointer;
+                padding: 4px 0;
+                margin-top: 4px;
+            }
+            .toggle-help:hover { text-decoration: underline; }
         </style>
     </head>
     <body>
@@ -1180,6 +1212,23 @@ async def onboard_page():
                 <div class="form-group">
                     <label for="phone">Your Mobile (for SMS approvals)</label>
                     <input type="tel" id="phone" name="phone" placeholder="+61 400 000 000" required>
+                </div>
+                <div class="form-group">
+                    <label for="locationId">Google Location ID (optional)</label>
+                    <input type="text" id="locationId" name="locationId" placeholder="accounts/123456/locations/789012">
+                    <button type="button" class="toggle-help" onclick="document.getElementById('helpBox').style.display = document.getElementById('helpBox').style.display === 'none' ? 'block' : 'none'">
+                        How do I find my Location ID?
+                    </button>
+                    <div id="helpBox" class="help-box" style="display: none;">
+                        <strong>Find your Location ID:</strong><br><br>
+                        1. Go to <a href="https://business.google.com/locations" target="_blank">Google Business Profile</a><br>
+                        2. Click your business location<br>
+                        3. Look at the URL - it will look like:<br>
+                        <code>https://business.google.com/locations/123456789/reviews</code><br><br>
+                        4. Your location ID format is:<br>
+                        <code>accounts/YOUR_ACCOUNT_ID/locations/LOCATION_ID</code><br><br>
+                        <em>Tip: Leave blank and we'll try to auto-detect it when you connect Google.</em>
+                    </div>
                 </div>
                 <button type="submit" class="btn">
                     <svg class="google-icon" viewBox="0 0 24 24">
@@ -1205,7 +1254,8 @@ async def onboard_page():
                 e.preventDefault();
                 const name = encodeURIComponent(document.getElementById('name').value);
                 const phone = encodeURIComponent(document.getElementById('phone').value);
-                const state = 'name=' + name + '&phone=' + phone;
+                const locationId = encodeURIComponent(document.getElementById('locationId').value || '');
+                const state = 'name=' + name + '&phone=' + phone + '&location_id=' + locationId;
                 window.location.href = '/google/auth?state=' + encodeURIComponent(state);
             });
         </script>
