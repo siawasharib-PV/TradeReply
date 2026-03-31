@@ -24,6 +24,11 @@ class Config:
     # Google Business API (Phase 2)
     GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "")
     GOOGLE_BUSINESS_ACCOUNT_ID = os.getenv("GOOGLE_BUSINESS_ACCOUNT_ID", "")
+    
+    # Google OAuth2 (Phase 2 - multi-tenant)
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://web-production-e56a13.up.railway.app/google/callback")
 
     # AI/Gemini
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

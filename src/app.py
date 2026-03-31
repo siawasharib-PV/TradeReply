@@ -83,6 +83,14 @@ class ManualPostAction(BaseModel):
     action: str  # posted | post_failed
 
 
+class GoogleConnectRequest(BaseModel):
+    """Request to connect Google Business Profile"""
+
+    client_id: str
+    client_secret: str
+    business_id: Optional[str] = None  # If None, create new business
+
+
 # ==================== LIFECYCLE ====================
 
 
@@ -601,6 +609,263 @@ async def twilio_inbound_webhook(
 
     except Exception as e:
         logger.error(f"Error handling inbound Twilio webhook: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== GOOGLE OAUTH ENDPOINTS ====================
+
+
+@app.get("/google/auth")
+async def google_auth(business_id: Optional[str] = None):
+    """Start Google OAuth flow"""
+    try:
+        from google_client import GoogleBusinessClient
+        
+        # Use platform credentials if available, otherwise need business-specific
+        if not config.GOOGLE_CLIENT_ID or not config.GOOGLE_CLIENT_SECRET:
+            raise HTTPException(
+                status_code=400,
+                detail="Google OAuth not configured. Please provide client_id and client_secret via /google/connect"
+            )
+        
+        client = GoogleBusinessClient(
+            client_id=config.GOOGLE_CLIENT_ID,
+            client_secret=config.GOOGLE_CLIENT_SECRET,
+            redirect_uri=config.GOOGLE_REDIRECT_URI,
+        )
+        
+        # Include business_id in state if provided
+        state = f"business_id={business_id}" if business_id else None
+        
+        auth_url = client.get_auth_url(state=state)
+        
+        db.create_audit_event(
+            event_type="google_oauth_started",
+            business_id=business_id,
+            message="Google OAuth flow initiated",
+        )
+        
+        return {"auth_url": auth_url}
+        
+    except Exception as e:
+        logger.error(f"Failed to start Google OAuth: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/google/connect")
+async def google_connect(request: GoogleConnectRequest):
+    """Connect Google Business Profile with provided credentials"""
+    try:
+        from google_client import GoogleBusinessClient
+        
+        client = GoogleBusinessClient(
+            client_id=request.client_id,
+            client_secret=request.client_secret,
+            redirect_uri=config.GOOGLE_REDIRECT_URI,
+        )
+        
+        auth_url = client.get_auth_url(state=f"business_id={request.business_id}" if request.business_id else None)
+        
+        db.create_audit_event(
+            event_type="google_connect_initiated",
+            business_id=request.business_id,
+            message="Google connection initiated with custom credentials",
+        )
+        
+        return {"auth_url": auth_url, "status": "redirect_to_google"}
+        
+    except Exception as e:
+        logger.error(f"Failed to connect Google: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/google/callback")
+async def google_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
+    """Handle Google OAuth callback"""
+    try:
+        from google_client import GoogleBusinessClient
+        
+        if error:
+            logger.error(f"Google OAuth error: {error}")
+            return HTMLResponse(
+                content=f"<html><body><h1>Authorization Failed</h1><p>Error: {error}</p></body></html>",
+                status_code=400
+            )
+        
+        # Parse business_id from state
+        business_id = None
+        if state and state.startswith("business_id="):
+            business_id = state.split("=")[1]
+        
+        # Exchange code for tokens
+        client = GoogleBusinessClient(
+            client_id=config.GOOGLE_CLIENT_ID,
+            client_secret=config.GOOGLE_CLIENT_SECRET,
+            redirect_uri=config.GOOGLE_REDIRECT_URI,
+        )
+        
+        tokens = client.exchange_code(code)
+        
+        # Store refresh token in business record
+        if business_id:
+            business = db.get_business(business_id)
+            if business:
+                db.update_business_mapping(
+                    business_id,
+                    google_refresh_token=tokens["refresh_token"],
+                )
+                logger.info(f"Stored Google refresh token for business {business_id}")
+        
+        db.create_audit_event(
+            event_type="google_oauth_completed",
+            business_id=business_id,
+            message="Google OAuth completed successfully",
+            payload={"has_refresh_token": bool(tokens.get("refresh_token"))},
+        )
+        
+        # Show success page
+        return HTMLResponse(
+            content="""
+            <html>
+            <head>
+                <title>TradeReply - Google Connected</title>
+                <style>
+                    body { font-family: -apple-system, sans-serif; background: #0f172a; color: white; text-align: center; padding: 60px; }
+                    .card { background: #1e293b; padding: 40px; border-radius: 12px; max-width: 500px; margin: 0 auto; }
+                    h1 { color: #22c55e; }
+                    .muted { color: #94a3b8; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1>✅ Connected!</h1>
+                    <p>Your Google Business Profile is now connected to TradeReply.</p>
+                    <p class="muted">You can close this window and return to TradeReply.</p>
+                </div>
+            </body>
+            </html>
+            """
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to handle Google callback: {e}")
+        return HTMLResponse(
+            content=f"<html><body><h1>Error</h1><p>{str(e)}</p></body></html>",
+            status_code=500
+        )
+
+
+@app.post("/businesses/{business_id}/sync-reviews")
+async def sync_google_reviews(business_id: str):
+    """Sync reviews from Google Business Profile for a business"""
+    try:
+        from google_client import GoogleBusinessClient, parse_google_review
+        
+        business = db.get_business(business_id)
+        if not business:
+            raise HTTPException(status_code=404, detail="Business not found")
+        
+        if not business.google_refresh_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Google not connected. Complete OAuth flow first."
+            )
+        
+        if not business.google_location_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Google location ID not set. Please configure location."
+            )
+        
+        # Initialize Google client with stored refresh token
+        client = GoogleBusinessClient(
+            client_id=config.GOOGLE_CLIENT_ID,
+            client_secret=config.GOOGLE_CLIENT_SECRET,
+            redirect_uri=config.GOOGLE_REDIRECT_URI,
+            refresh_token=business.google_refresh_token,
+        )
+        
+        # Fetch reviews
+        result = client.get_reviews(business.google_location_id)
+        reviews = result.get("reviews", [])
+        
+        new_reviews = []
+        for google_review in reviews:
+            parsed = parse_google_review(google_review)
+            
+            # Check if we already have this review
+            existing = db.get_review_by_google_id(parsed["google_review_id"])
+            if existing:
+                continue
+            
+            # Create new review record
+            review_id = str(uuid.uuid4())
+            review = Review(
+                id=review_id,
+                business_id=business_id,
+                reviewer_name=parsed["reviewer_name"],
+                rating=StarRating(parsed["rating"]),
+                review_text=parsed["review_text"],
+                google_review_id=parsed["google_review_id"],
+                google_review_name=parsed["google_review_name"],
+            )
+            
+            if db.create_review(review):
+                new_reviews.append(parsed)
+                
+                # Generate AI draft and send SMS approval
+                draft_text = ai_handler.generate_response(review, business)
+                
+                draft_id = str(uuid.uuid4())
+                draft = DraftResponse(
+                    id=draft_id,
+                    review_id=review_id,
+                    business_id=business_id,
+                    draft_text=draft_text,
+                    status="drafted",
+                )
+                db.create_draft_response(draft)
+                
+                # Send SMS for approval
+                sms_message = build_sms_approval_message(
+                    parsed["reviewer_name"],
+                    StarRating(parsed["rating"]),
+                    parsed["review_text"],
+                    draft_text,
+                )
+                
+                sms_handler.send_approval_request(business.sms_recipient, sms_message)
+                
+                # Create pending approval
+                approval_id = str(uuid.uuid4())
+                approval = PendingApproval(
+                    id=approval_id,
+                    draft_response_id=draft_id,
+                    business_id=business_id,
+                    sms_sent_at=datetime.utcnow(),
+                    status=ApprovalStatus.PENDING,
+                    sms_message=sms_message,
+                )
+                db.create_pending_approval(approval)
+        
+        db.create_audit_event(
+            event_type="google_reviews_synced",
+            business_id=business_id,
+            message=f"Synced {len(new_reviews)} new reviews from Google",
+            payload={"total_reviews": len(reviews), "new_reviews": len(new_reviews)},
+        )
+        
+        return {
+            "status": "synced",
+            "total_reviews": len(reviews),
+            "new_reviews": len(new_reviews),
+            "reviews": new_reviews,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to sync Google reviews: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

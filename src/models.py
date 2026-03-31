@@ -37,6 +37,7 @@ class Business:
         description: Optional[str] = None,
         google_location_id: Optional[str] = None,
         google_account_id: Optional[str] = None,
+        google_refresh_token: Optional[str] = None,
         response_tone: Optional[str] = None,
         created_at: Optional[datetime] = None,
     ):
@@ -47,6 +48,7 @@ class Business:
         self.description = description
         self.google_location_id = google_location_id
         self.google_account_id = google_account_id
+        self.google_refresh_token = google_refresh_token
         self.response_tone = response_tone
         self.created_at = created_at or datetime.utcnow()
 
@@ -61,6 +63,8 @@ class Review:
         rating: StarRating,
         review_text: str,
         reviewer_email: Optional[str] = None,
+        google_review_id: Optional[str] = None,
+        google_review_name: Optional[str] = None,
         created_at: Optional[datetime] = None,
     ):
         self.id = id
@@ -69,6 +73,8 @@ class Review:
         self.rating = rating
         self.review_text = review_text
         self.reviewer_email = reviewer_email
+        self.google_review_id = google_review_id
+        self.google_review_name = google_review_name
         self.created_at = created_at or datetime.utcnow()
 
 

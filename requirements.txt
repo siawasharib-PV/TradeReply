@@ -9,6 +9,11 @@ python-multipart==0.0.20
 # AI Integration
 google-generativeai==0.8.0
 
+# Google Business Profile API (Phase 2)
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
+google-api-python-client==2.151.0
+
 # SMS Integration  
 twilio==9.0.0
 
