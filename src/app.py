@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, Form
-from fastapi.responses import PlainTextResponse, HTMLResponse, Response
+from fastapi.responses import PlainTextResponse, HTMLResponse, Response, RedirectResponse
 import os
 from config import Config, get_config
 from config import ConfigError
@@ -636,7 +636,7 @@ async def google_auth(business_id: Optional[str] = None):
             message="Google OAuth flow initiated",
         )
         
-        return {"auth_url": auth_url}
+        return RedirectResponse(url=auth_url)
         
     except Exception as e:
         logger.error(f"Failed to start Google OAuth: {e}")
