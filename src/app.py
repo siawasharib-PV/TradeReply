@@ -824,8 +824,22 @@ async def sync_google_reviews(business_id: str):
             refresh_token=business.google_refresh_token,
         )
         
+        # Build full location path if needed
+        location_id = business.google_location_id
+        if location_id and not location_id.startswith("accounts/"):
+            # Need to discover account ID to build full path
+            try:
+                accounts = client.get_accounts()
+                if accounts:
+                    account_name = accounts[0].get("name", "")  # e.g., "accounts/123456"
+                    if account_name:
+                        location_id = f"{account_name}/{location_id}"
+                        logger.info(f"Built full location path: {location_id}")
+            except Exception as acc_err:
+                logger.warning(f"Could not auto-discover account for location: {acc_err}")
+        
         # Fetch reviews
-        result = client.get_reviews(business.google_location_id)
+        result = client.get_reviews(location_id)
         reviews = result.get("reviews", [])
         
         new_reviews = []
@@ -1184,8 +1198,10 @@ async def onboard_page():
                 border-radius: 4px;
                 color: #93c5fd;
                 font-size: 12px;
+                word-break: break-all;
             }
             .help-box a { color: #60a5fa; }
+            .help-box .step { margin-bottom: 8px; }
             .toggle-help {
                 background: none;
                 border: none;
@@ -1196,6 +1212,7 @@ async def onboard_page():
                 margin-top: 4px;
             }
             .toggle-help:hover { text-decoration: underline; }
+            .warning { color: #fbbf24; font-size: 12px; margin-top: 4px; }
         </style>
     </head>
     <body>

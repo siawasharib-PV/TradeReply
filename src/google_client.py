@@ -239,6 +239,18 @@ class GoogleBusinessClient:
         """
         try:
             from googleapiclient.discovery import build
+            from google.oauth2.credentials import Credentials
+            
+            # Ensure credentials are initialized from refresh token
+            if not self.credentials and self.refresh_token:
+                self.credentials = Credentials(
+                    token=None,
+                    refresh_token=self.refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=self.client_id,
+                    client_secret=self.client_secret,
+                    scopes=["https://www.googleapis.com/auth/business.manage"],
+                )
             
             # Reviews use the classic mybusiness API (still available)
             reviews_service = build(
