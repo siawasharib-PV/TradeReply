@@ -1098,6 +1098,203 @@ async def debug_business_reviews(business_id: str):
     ]
 
 
+@app.get("/submit-review")
+async def submit_review_page():
+    """Simple form to submit a review manually"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>TradeReply - Submit Review</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                min-height: 100vh;
+                padding: 40px 20px;
+            }
+            .container { max-width: 600px; margin: 0 auto; }
+            .card {
+                background: #1e293b;
+                border-radius: 16px;
+                padding: 40px;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            }
+            h1 { color: #f1f5f9; font-size: 28px; margin-bottom: 8px; }
+            p { color: #94a3b8; font-size: 15px; margin-bottom: 24px; }
+            
+            .form-group { margin-bottom: 20px; }
+            label { display: block; color: #e2e8f0; font-size: 14px; margin-bottom: 8px; font-weight: 500; }
+            input, textarea, select {
+                width: 100%;
+                padding: 14px 16px;
+                font-size: 16px;
+                border: 1px solid #334155;
+                border-radius: 10px;
+                background: #0f172a;
+                color: #f1f5f9;
+                transition: border-color 0.2s;
+            }
+            textarea { min-height: 120px; resize: vertical; }
+            input:focus, textarea:focus, select:focus { outline: none; border-color: #4285f4; }
+            input::placeholder, textarea::placeholder { color: #64748b; }
+            
+            .btn {
+                width: 100%;
+                background: #4285f4;
+                color: white;
+                border: none;
+                padding: 16px 32px;
+                font-size: 18px;
+                font-weight: 600;
+                border-radius: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .btn:hover { background: #3367d6; }
+            .btn:disabled { background: #475569; cursor: not-allowed; }
+            
+            .success {
+                background: #065f46;
+                border: 1px solid #10b981;
+                border-radius: 12px;
+                padding: 20px;
+                margin-bottom: 20px;
+                display: none;
+            }
+            .success h2 { color: #10b981; font-size: 20px; margin-bottom: 8px; }
+            .success p { color: #a7f3d0; margin-bottom: 0; }
+            
+            .stars { display: flex; gap: 8px; margin-bottom: 8px; }
+            .star { font-size: 32px; cursor: pointer; color: #334155; transition: color 0.2s; }
+            .star.active { color: #fbbf24; }
+            .star:hover { color: #fcd34d; }
+            
+            .nav { margin-bottom: 20px; }
+            .nav a { color: #60a5fa; text-decoration: none; font-size: 14px; }
+            .nav a:hover { text-decoration: underline; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="nav">
+                <a href="/ops/dashboard">← Dashboard</a> &nbsp;|&nbsp; <a href="/onboard">Add Business</a>
+            </div>
+            <div class="card">
+                <h1>📝 Submit a Review</h1>
+                <p>Paste a review from Google and we'll generate an AI response for approval.</p>
+                
+                <div id="successBox" class="success">
+                    <h2>✅ Review Submitted!</h2>
+                    <p>Check your phone for the approval SMS.</p>
+                </div>
+                
+                <form id="reviewForm">
+                    <div class="form-group">
+                        <label for="businessId">Business</label>
+                        <select id="businessId" name="businessId" required>
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Rating</label>
+                        <div class="stars" id="stars">
+                            <span class="star" data-rating="1">★</span>
+                            <span class="star" data-rating="2">★</span>
+                            <span class="star" data-rating="3">★</span>
+                            <span class="star" data-rating="4">★</span>
+                            <span class="star" data-rating="5">★</span>
+                        </div>
+                        <input type="hidden" id="rating" name="rating" value="5">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="reviewerName">Reviewer Name</label>
+                        <input type="text" id="reviewerName" name="reviewerName" placeholder="e.g. John Smith" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="reviewText">Review Text</label>
+                        <textarea id="reviewText" name="reviewText" placeholder="Paste the review here..." required></textarea>
+                    </div>
+                    
+                    <button type="submit" class="btn" id="submitBtn">Generate AI Response</button>
+                </form>
+            </div>
+        </div>
+        
+        <script>
+            // Load businesses
+            fetch('/businesses')
+                .then(r => r.json())
+                .then(businesses => {
+                    const select = document.getElementById('businessId');
+                    select.innerHTML = businesses.length === 0 
+                        ? '<option value="">No businesses - add one first</option>'
+                        : businesses.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+                });
+            
+            // Star rating
+            let selectedRating = 5;
+            document.querySelectorAll('.star').forEach(star => {
+                star.classList.add('active');
+                star.addEventListener('click', () => {
+                    selectedRating = parseInt(star.dataset.rating);
+                    document.getElementById('rating').value = selectedRating;
+                    document.querySelectorAll('.star').forEach((s, i) => {
+                        s.classList.toggle('active', i < selectedRating);
+                    });
+                });
+            });
+            
+            // Form submit
+            document.getElementById('reviewForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById('submitBtn');
+                btn.disabled = true;
+                btn.textContent = 'Processing...';
+                
+                const data = {
+                    business_id: document.getElementById('businessId').value,
+                    reviewer_name: document.getElementById('reviewerName').value,
+                    rating: parseInt(document.getElementById('rating').value),
+                    review_text: document.getElementById('reviewText').value,
+                };
+                
+                try {
+                    const res = await fetch('/reviews', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    
+                    if (res.ok) {
+                        document.getElementById('successBox').style.display = 'block';
+                        document.getElementById('reviewForm').reset();
+                        document.querySelectorAll('.star').forEach(s => s.classList.add('active'));
+                        document.getElementById('rating').value = 5;
+                        selectedRating = 5;
+                    } else {
+                        const err = await res.json();
+                        alert('Error: ' + (err.detail || JSON.stringify(err)));
+                    }
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                }
+                
+                btn.disabled = false;
+                btn.textContent = 'Generate AI Response';
+            });
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
 @app.get("/onboard")
 async def onboard_page():
     """Simple onboarding page - one click to connect Google"""
