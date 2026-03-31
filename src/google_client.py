@@ -239,7 +239,7 @@ class GoogleBusinessClient:
             )
             
             request_params = {
-                "name": location_name,
+                "parent": location_name,
                 "pageSize": page_size,
             }
             
