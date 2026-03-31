@@ -607,7 +607,7 @@ async def twilio_inbound_webhook(
 
 
 @app.get("/google/auth")
-async def google_auth(business_id: Optional[str] = None):
+async def google_auth(state: Optional[str] = None):
     """Start Google OAuth flow"""
     try:
         from google_client import GoogleBusinessClient
@@ -625,14 +625,11 @@ async def google_auth(business_id: Optional[str] = None):
             redirect_uri=config.GOOGLE_REDIRECT_URI,
         )
         
-        # Include business_id in state if provided
-        state = f"business_id={business_id}" if business_id else None
-        
+        # Pass through state as-is (contains name, phone, and optional business_id)
         auth_url = client.get_auth_url(state=state)
         
         db.create_audit_event(
             event_type="google_oauth_started",
-            business_id=business_id,
             message="Google OAuth flow initiated",
         )
         
@@ -672,9 +669,9 @@ async def google_connect(request: GoogleConnectRequest):
 
 @app.get("/google/callback")
 async def google_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
-    """Handle Google OAuth callback"""
+    """Handle Google OAuth callback - auto-discovers locations for one-step setup"""
     try:
-        from google_client import GoogleBusinessClient
+        from google_client import GoogleBusinessClient, parse_google_review
         
         if error:
             logger.error(f"Google OAuth error: {error}")
@@ -683,10 +680,20 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
                 status_code=400
             )
         
-        # Parse business_id from state
+        # Parse business_id from state (optional - we can create one if missing)
         business_id = None
-        if state and state.startswith("business_id="):
-            business_id = state.split("=")[1]
+        business_name = "My Business"
+        sms_recipient = None
+        if state:
+            # Parse state params like "business_id=xxx&name=MyBiz&phone=+61..."
+            params = {}
+            for pair in state.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+            business_id = params.get("business_id")
+            business_name = params.get("name", "My Business")
+            sms_recipient = params.get("phone")
         
         # Exchange code for tokens
         client = GoogleBusinessClient(
@@ -697,41 +704,77 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
         
         tokens = client.exchange_code(code)
         
-        # Store refresh token in business record
-        if business_id:
-            business = db.get_business(business_id)
-            if business:
-                db.update_business_mapping(
-                    business_id,
-                    google_refresh_token=tokens["refresh_token"],
-                )
-                logger.info(f"Stored Google refresh token for business {business_id}")
+        # Auto-discover accounts and locations
+        discovered_location = None
+        discovered_location_name = None
+        try:
+            accounts = client.get_accounts()
+            if accounts:
+                first_account = accounts[0]
+                account_name = first_account.get("name", "")  # e.g., "accounts/123456"
+                locations = client.get_locations(account_name)
+                if locations:
+                    first_location = locations[0]
+                    discovered_location = first_location.get("name")  # e.g., "accounts/123/locations/456"
+                    discovered_location_name = first_location.get("title", "Unknown Location")
+                    logger.info(f"Auto-discovered location: {discovered_location} ({discovered_location_name})")
+        except Exception as discovery_error:
+            logger.warning(f"Could not auto-discover locations: {discovery_error}")
+        
+        # Create business if needed
+        if not business_id:
+            business_id = str(uuid.uuid4())
+            business = Business(
+                id=business_id,
+                name=business_name,
+                phone=sms_recipient or "+61000000000",
+                sms_recipient=sms_recipient or "+61000000000",
+                google_location_id=discovered_location,
+                google_refresh_token=tokens["refresh_token"],
+            )
+            db.create_business(business)
+            logger.info(f"Created new business {business_id} with Google connection")
+        else:
+            # Update existing business
+            db.update_business_mapping(
+                business_id,
+                google_refresh_token=tokens["refresh_token"],
+                google_location_id=discovered_location,
+            )
+            logger.info(f"Updated business {business_id} with Google connection")
         
         db.create_audit_event(
             event_type="google_oauth_completed",
             business_id=business_id,
             message="Google OAuth completed successfully",
-            payload={"has_refresh_token": bool(tokens.get("refresh_token"))},
+            payload={
+                "has_refresh_token": bool(tokens.get("refresh_token")),
+                "auto_discovered_location": discovered_location,
+                "location_name": discovered_location_name,
+            },
         )
         
-        # Show success page
+        # Show success page with location info
+        location_display = discovered_location_name or "Location configured"
         return HTMLResponse(
-            content="""
+            content=f"""
             <html>
             <head>
                 <title>TradeReply - Google Connected</title>
                 <style>
-                    body { font-family: -apple-system, sans-serif; background: #0f172a; color: white; text-align: center; padding: 60px; }
-                    .card { background: #1e293b; padding: 40px; border-radius: 12px; max-width: 500px; margin: 0 auto; }
-                    h1 { color: #22c55e; }
-                    .muted { color: #94a3b8; }
+                    body {{ font-family: -apple-system, sans-serif; background: #0f172a; color: white; text-align: center; padding: 60px; }}
+                    .card {{ background: #1e293b; padding: 40px; border-radius: 12px; max-width: 500px; margin: 0 auto; }}
+                    h1 {{ color: #22c55e; }}
+                    .muted {{ color: #94a3b8; }}
+                    .location {{ background: #334155; padding: 12px 20px; border-radius: 8px; margin: 20px 0; font-weight: 500; }}
                 </style>
             </head>
             <body>
                 <div class="card">
                     <h1>✅ Connected!</h1>
-                    <p>Your Google Business Profile is now connected to TradeReply.</p>
-                    <p class="muted">You can close this window and return to TradeReply.</p>
+                    <p>Your Google Business Profile is now linked to TradeReply.</p>
+                    <div class="location">📍 {location_display}</div>
+                    <p class="muted">New reviews will automatically generate AI responses for your approval via SMS.</p>
                 </div>
             </body>
             </html>
@@ -998,16 +1041,33 @@ async def onboard_page():
                 padding: 40px;
                 max-width: 480px;
                 width: 100%;
-                text-align: center;
                 box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             }
-            .logo { font-size: 48px; margin-bottom: 16px; }
-            h1 { color: #f1f5f9; font-size: 28px; margin-bottom: 12px; }
-            p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 32px; }
+            .logo { font-size: 48px; margin-bottom: 16px; text-align: center; }
+            h1 { color: #f1f5f9; font-size: 28px; margin-bottom: 12px; text-align: center; }
+            p { color: #94a3b8; font-size: 16px; line-height: 1.6; margin-bottom: 24px; text-align: center; }
+            
+            .form-group { margin-bottom: 20px; }
+            label { display: block; color: #e2e8f0; font-size: 14px; margin-bottom: 8px; font-weight: 500; }
+            input {
+                width: 100%;
+                padding: 14px 16px;
+                font-size: 16px;
+                border: 1px solid #334155;
+                border-radius: 10px;
+                background: #0f172a;
+                color: #f1f5f9;
+                transition: border-color 0.2s;
+            }
+            input:focus { outline: none; border-color: #4285f4; }
+            input::placeholder { color: #64748b; }
+            
             .btn {
-                display: inline-flex;
+                display: flex;
                 align-items: center;
+                justify-content: center;
                 gap: 12px;
+                width: 100%;
                 background: #4285f4;
                 color: white;
                 border: none;
@@ -1018,25 +1078,27 @@ async def onboard_page():
                 cursor: pointer;
                 text-decoration: none;
                 transition: all 0.2s;
+                margin-top: 8px;
             }
             .btn:hover { background: #3367d6; transform: translateY(-2px); }
             .btn:active { transform: translateY(0); }
             .google-icon { width: 24px; height: 24px; }
+            
             .features {
-                margin-top: 32px;
-                text-align: left;
+                margin-top: 28px;
+                padding-top: 24px;
+                border-top: 1px solid #334155;
             }
             .feature {
                 display: flex;
                 align-items: center;
                 gap: 12px;
-                padding: 12px 0;
-                border-bottom: 1px solid #334155;
+                padding: 10px 0;
                 color: #e2e8f0;
                 font-size: 15px;
             }
-            .feature:last-child { border-bottom: none; }
-            .check { color: #22c55e; font-size: 20px; }
+            .check { color: #22c55e; font-size: 18px; }
+            .note { font-size: 13px; color: #64748b; text-align: center; margin-top: 16px; }
         </style>
     </head>
     <body>
@@ -1045,22 +1107,43 @@ async def onboard_page():
             <h1>Connect Your Business</h1>
             <p>Link your Google Business Profile to automatically respond to reviews with AI.</p>
             
-            <a href="/google/auth?business_id=a3a21dbc-d7b2-408b-9604-971cc49fd34e" class="btn">
-                <svg class="google-icon" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                Connect with Google
-            </a>
+            <form id="onboardForm">
+                <div class="form-group">
+                    <label for="name">Business Name</label>
+                    <input type="text" id="name" name="name" placeholder="e.g. Pada Ventures" required>
+                </div>
+                <div class="form-group">
+                    <label for="phone">Your Mobile (for SMS approvals)</label>
+                    <input type="tel" id="phone" name="phone" placeholder="+61 400 000 000" required>
+                </div>
+                <button type="submit" class="btn">
+                    <svg class="google-icon" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    Connect with Google
+                </button>
+            </form>
             
             <div class="features">
                 <div class="feature"><span class="check">✓</span> AI writes personalized responses</div>
                 <div class="feature"><span class="check">✓</span> You approve via SMS before posting</div>
                 <div class="feature"><span class="check">✓</span> Auto-post to Google after approval</div>
             </div>
+            <p class="note">Your Google data stays secure. We only access reviews you choose to respond to.</p>
         </div>
+        
+        <script>
+            document.getElementById('onboardForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const name = encodeURIComponent(document.getElementById('name').value);
+                const phone = encodeURIComponent(document.getElementById('phone').value);
+                const state = 'name=' + name + '&phone=' + phone;
+                window.location.href = '/google/auth?state=' + encodeURIComponent(state);
+            });
+        </script>
     </body>
     </html>
     """
