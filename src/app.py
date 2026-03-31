@@ -681,6 +681,7 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
             )
         
         # Parse business_id from state (optional - we can create one if missing)
+        import urllib.parse
         business_id = None
         business_name = "My Business"
         sms_recipient = None
@@ -690,7 +691,7 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
             for pair in state.split("&"):
                 if "=" in pair:
                     k, v = pair.split("=", 1)
-                    params[k] = v
+                    params[k] = urllib.parse.unquote(v)  # Decode URL encoding
             business_id = params.get("business_id")
             business_name = params.get("name", "My Business")
             sms_recipient = params.get("phone")

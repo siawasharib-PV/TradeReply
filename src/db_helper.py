@@ -173,8 +173,8 @@ class DatabaseHelper:
         try:
             self.cursor.execute(
                 """
-                INSERT INTO businesses (id, name, phone, sms_recipient, description, google_location_id, google_account_id, response_tone, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO businesses (id, name, phone, sms_recipient, description, google_location_id, google_account_id, google_refresh_token, response_tone, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     business.id,
@@ -184,6 +184,7 @@ class DatabaseHelper:
                     business.description,
                     business.google_location_id,
                     business.google_account_id,
+                    business.google_refresh_token,
                     business.response_tone,
                     business.created_at.isoformat(),
                 ),
