@@ -14,7 +14,6 @@ from config import Config, get_config, ConfigError
 from pydantic import BaseModel
 import uvicorn
 
-from config import Config, get_config
 from db_helper import DatabaseHelper
 from ai_integration import AIHandler
 from sms_handler import SMSHandler
