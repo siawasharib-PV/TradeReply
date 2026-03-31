@@ -164,9 +164,19 @@ class GoogleBusinessClient:
             List of account dicts with name, accountName, etc.
         """
         try:
-            # Note: This uses the Business Profile API v1
-            # Documentation: https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts
             from googleapiclient.discovery import build
+            
+            # Ensure credentials are initialized from refresh token
+            if not self.credentials and self.refresh_token:
+                from google.oauth2.credentials import Credentials
+                self.credentials = Credentials(
+                    token=None,
+                    refresh_token=self.refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=self.client_id,
+                    client_secret=self.client_secret,
+                    scopes=["https://www.googleapis.com/auth/business.manage"],
+                )
             
             # Need to use mybusinessaccountmanagement for accounts
             account_service = build(
