@@ -83,20 +83,25 @@ def build_sms_approval_message(
     approval_id: str = None,
 ) -> str:
     """
-    Build the SMS message - SHORT to fit in one SMS segment.
-    Full details available on dashboard.
+    Build the SMS message with short previews of review and response.
     """
     
     stars = "⭐" * rating.value
     
+    # Short previews (truncate to fit SMS)
+    review_preview = review_text[:80] + "..." if len(review_text) > 80 else review_text
+    draft_preview = draft_response[:100] + "..." if len(draft_response) > 100 else draft_response
+    
     message = f"""📝 New {rating.value}-star review {stars}
-From: {reviewer_name}
 
-✅ YES to approve
-❌ NO to skip
+Review from {reviewer_name}:
+"{review_preview}"
 
-View full details:
-web-production-e56a13.up.railway.app/ops/dashboard"""
+AI draft reply:
+"{draft_preview}"
+
+✅ Reply YES to approve
+❌ Reply NO to skip"""
     
     return message
 
