@@ -1106,6 +1106,42 @@ async def debug_config():
     }
 
 
+@app.get("/debug/ai-test")
+async def debug_ai_test():
+    """Debug endpoint: Test AI response generation"""
+    try:
+        from ai_integration import AIHandler
+        from models import Review, Business, StarRating
+        
+        # Create test review
+        test_review = Review(
+            id="test-123",
+            business_id="test-biz",
+            reviewer_name="Test Customer",
+            rating=StarRating(4),
+            review_text="Great coffee but the music was too loud. Staff were friendly!",
+            created_at=datetime.utcnow(),
+        )
+        
+        test_business = Business(
+            id="test-biz",
+            name="Test Cafe",
+            phone="+61000000000",
+            sms_recipient="+61000000000",
+        )
+        
+        ai = AIHandler()
+        
+        return {
+            "dry_run": ai.dry_run,
+            "has_client": ai.client is not None,
+            "api_key_set": bool(ai.api_key),
+            "response": ai.generate_response(test_review, test_business),
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": str(e.__traceback__)}
+
+
 @app.get("/debug/reviews/{business_id}")
 async def debug_business_reviews(business_id: str):
     """Debug endpoint: Get all reviews for a business"""
