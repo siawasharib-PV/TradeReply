@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4285f4">
+    <title>TradeReply - AI Review Responder</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+            min-height: 100vh;
+            color: #f1f5f9;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px 16px;
+            padding-bottom: 100px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 20px 0 30px;
+        }
+        
+        .logo {
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+        
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .tagline {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+        
+        .card {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .card h2 {
+            font-size: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+        
+        select, textarea, input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            background: #0f172a;
+            color: #f1f5f9;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        
+        select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 40px;
+        }
+        
+        select:focus, textarea:focus, input:focus {
+            outline: none;
+            border-color: #4285f4;
+        }
+        
+        .stars {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            padding: 8px 0;
+        }
+        
+        .star {
+            font-size: 36px;
+            cursor: pointer;
+            color: #334155;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+        
+        .star.active {
+            color: #fbbf24;
+            transform: scale(1.1);
+        }
+        
+        .star:hover {
+            transform: scale(1.15);
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #4285f4 0%, #3367d6 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(66, 133, 244, 0.4);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(66, 133, 244, 0.5);
+        }
+        
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+        
+        .btn-primary:disabled {
+            background: #475569;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid #334155;
+            color: #94a3b8;
+            margin-top: 12px;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+        
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Response Section */
+        .response-section {
+            display: none;
+        }
+        
+        .response-section.visible {
+            display: block;
+        }
+        
+        .response-box {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+        
+        .response-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .copied-toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #10b981;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+        
+        .copied-toast.visible {
+            opacity: 1;
+        }
+        
+        /* Quick paste section */
+        .quick-paste {
+            margin-bottom: 24px;
+        }
+        
+        .quick-paste textarea {
+            font-size: 14px;
+        }
+        
+        /* Business selector */
+        .business-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: #0f172a;
+            border-radius: 10px;
+            margin-bottom: 16px;
+        }
+        
+        .business-icon {
+            font-size: 24px;
+        }
+        
+        .business-info {
+            flex: 1;
+        }
+        
+        .business-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        
+        .business-status {
+            font-size: 12px;
+            color: #10b981;
+        }
+        
+        /* Instructions */
+        .instructions {
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+            font-size: 13px;
+        }
+        
+        .instructions p {
+            margin-bottom: 8px;
+        }
+        
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #64748b;
+        }
+        
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        /* History */
+        .history-item {
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+        }
+        
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        
+        .history-reviewer {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .history-preview {
+            font-size: 13px;
+            color: #94a3b8;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🏪</div>
+            <h1>TradeReply</h1>
+            <p class="tagline">AI-powered review responses in seconds</p>
+        </header>
+        
+        <!-- Business Info -->
+        <div class="business-row" id="businessRow">
+            <div class="business-icon">🏢</div>
+            <div class="business-info">
+                <div class="business-name" id="businessName">Loading...</div>
+                <div class="business-status">✓ Connected</div>
+            </div>
+        </div>
+        
+        <!-- Main Form -->
+        <div class="card" id="inputCard">
+            <h2>📝 New Review</h2>
+            
+            <div class="form-group">
+                <label>Rating</label>
+                <div class="stars" id="stars">
+                    <span class="star" data-rating="1">★</span>
+                    <span class="star" data-rating="2">★</span>
+                    <span class="star" data-rating="3">★</span>
+                    <span class="star" data-rating="4">★</span>
+                    <span class="star active" data-rating="5">★</span>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Reviewer Name</label>
+                <input type="text" id="reviewerName" placeholder="e.g. John Smith" autocomplete="off">
+            </div>
+            
+            <div class="form-group">
+                <label>Paste Review Text</label>
+                <textarea id="reviewText" placeholder="Copy and paste the customer's review here..."></textarea>
+            </div>
+            
+            <button class="btn btn-primary" id="generateBtn">
+                <span>🤖</span> Generate AI Response
+            </button>
+        </div>
+        
+        <!-- Response Section (hidden initially) -->
+        <div class="response-section" id="responseSection">
+            <div class="card">
+                <h2>✅ AI Response Ready!</h2>
+                
+                <div class="response-meta">
+                    <span id="responseRating">⭐⭐⭐⭐⭐</span>
+                    <span>•</span>
+                    <span id="responseName">Customer</span>
+                </div>
+                
+                <div class="response-box" id="responseText">
+                    Response will appear here...
+                </div>
+                
+                <button class="btn btn-success" id="copyBtn">
+                    <span>📋</span> Copy Response
+                </button>
+                
+                <button class="btn btn-secondary" id="newResponseBtn">
+                    <span>🔄</span> New Review
+                </button>
+            </div>
+            
+            <div class="instructions">
+                <p><strong>Next step:</strong></p>
+                <p>1. Open Google Business Profile app</p>
+                <p>2. Find the review</p>
+                <p>3. Paste your response</p>
+                <p>4. Done! 🎉</p>
+            </div>
+        </div>
+        
+        <div class="copied-toast" id="copiedToast">✓ Copied to clipboard!</div>
+    </div>
+    
+    <script>
+        const API_URL = 'https://web-production-e56a13.up.railway.app';
+        
+        let businessId = null;
+        let selectedRating = 5;
+        let currentResponse = '';
+        
+        // Elements
+        const stars = document.querySelectorAll('.star');
+        const generateBtn = document.getElementById('generateBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const newResponseBtn = document.getElementById('newResponseBtn');
+        const inputCard = document.getElementById('inputCard');
+        const responseSection = document.getElementById('responseSection');
+        const copiedToast = document.getElementById('copiedToast');
+        const businessNameEl = document.getElementById('businessName');
+        
+        // Initialize
+        async function init() {
+            // Load or create business
+            try {
+                const res = await fetch(`${API_URL}/businesses`);
+                const businesses = await res.json();
+                
+                if (businesses && businesses.length > 0) {
+                    businessId = businesses[0].id;
+                    businessNameEl.textContent = businesses[0].name;
+                } else {
+                    // Create business
+                    const createRes = await fetch(`${API_URL}/businesses?name=My%20Business&phone=%2B61000000000&sms_recipient=%2B61000000000`, {
+                        method: 'POST'
+                    });
+                    const data = await createRes.json();
+                    businessId = data.business_id;
+                    businessNameEl.textContent = 'My Business';
+                }
+            } catch (e) {
+                console.error('Error loading business:', e);
+                businessNameEl.textContent = 'My Business';
+            }
+        }
+        
+        // Star rating
+        stars.forEach(star => {
+            star.addEventListener('click', () => {
+                selectedRating = parseInt(star.dataset.rating);
+                updateStars();
+            });
+            
+            star.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                selectedRating = parseInt(star.dataset.rating);
+                updateStars();
+            });
+        });
+        
+        function updateStars() {
+            stars.forEach((s, i) => {
+                s.classList.toggle('active', i < selectedRating);
+            });
+        }
+        
+        // Generate response
+        generateBtn.addEventListener('click', generateResponse);
+        
+        async function generateResponse() {
+            const reviewerName = document.getElementById('reviewerName').value.trim() || 'Customer';
+            const reviewText = document.getElementById('reviewText').value.trim();
+            
+            if (!reviewText) {
+                alert('Please paste the review text');
+                return;
+            }
+            
+            // Show loading
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<div class="loading-spinner"></div> Generating...';
+            
+            try {
+                const res = await fetch(`${API_URL}/reviews`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        business_id: businessId,
+                        reviewer_name: reviewerName,
+                        rating: selectedRating,
+                        review_text: reviewText
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.draft) {
+                    currentResponse = data.draft;
+                    
+                    // Update response section
+                    document.getElementById('responseRating').textContent = '⭐'.repeat(selectedRating);
+                    document.getElementById('responseName').textContent = reviewerName;
+                    document.getElementById('responseText').textContent = currentResponse;
+                    
+                    // Show response
+                    inputCard.style.display = 'none';
+                    responseSection.classList.add('visible');
+                } else {
+                    throw new Error('No response generated');
+                }
+                
+            } catch (e) {
+                alert('Error generating response. Please try again.');
+                console.error(e);
+            }
+            
+            // Reset button
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<span>🤖</span> Generate AI Response';
+        }
+        
+        // Copy response
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(currentResponse);
+                showToast();
+            } catch (e) {
+                // Fallback for older browsers
+                const textarea = document.createElement('textarea');
+                textarea.value = currentResponse;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showToast();
+            }
+        });
+        
+        function showToast() {
+            copiedToast.classList.add('visible');
+            setTimeout(() => {
+                copiedToast.classList.remove('visible');
+            }, 2000);
+        }
+        
+        // New response
+        newResponseBtn.addEventListener('click', () => {
+            inputCard.style.display = 'block';
+            responseSection.classList.remove('visible');
+            document.getElementById('reviewerName').value = '';
+            document.getElementById('reviewText').value = '';
+            selectedRating = 5;
+            updateStars();
+        });
+        
+        // Start
+        init();
+    </script>
+</body>
+</html>

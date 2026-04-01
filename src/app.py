@@ -1159,6 +1159,19 @@ async def debug_business_reviews(business_id: str):
     ]
 
 
+@app.get("/mobile")
+async def mobile_app():
+    """Mobile-friendly web app for generating review responses"""
+    from fastapi.responses import FileResponse
+    import os
+    
+    mobile_path = os.path.join(os.path.dirname(__file__), "static", "mobile.html")
+    if os.path.exists(mobile_path):
+        return FileResponse(mobile_path, media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Mobile app not found")
+
+
 @app.get("/submit-review")
 async def submit_review_page():
     """Simple form to submit a review manually"""
