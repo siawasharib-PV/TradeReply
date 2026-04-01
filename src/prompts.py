@@ -83,28 +83,20 @@ def build_sms_approval_message(
     approval_id: str = None,
 ) -> str:
     """
-    Build the SMS message to send to the business owner for approval.
-    Short SMS with link to view full details on dashboard.
+    Build the SMS message - SHORT to fit in one SMS segment.
+    Full details available on dashboard.
     """
     
     stars = "⭐" * rating.value
     
-    # Very short preview
-    review_preview = review_text[:60] + "..." if len(review_text) > 60 else review_text
-    draft_preview = draft_response[:80] + "..." if len(draft_response) > 80 else draft_response
-    
     message = f"""📝 New {rating.value}-star review {stars}
-
 From: {reviewer_name}
-"{review_preview}"
 
-Draft reply:
-"{draft_preview}"
+✅ YES to approve
+❌ NO to skip
 
-✅ Reply YES to approve
-❌ Reply NO to skip
-
-View dashboard: web-production-e56a13.up.railway.app/ops/dashboard"""
+View full details:
+web-production-e56a13.up.railway.app/ops/dashboard"""
     
     return message
 
@@ -115,26 +107,18 @@ def build_sms_confirmation_message(
     rating: StarRating,
 ) -> str:
     """
-    Build confirmation SMS to send to business owner after they approve/reject.
-    
-    Args:
-        approved: True if approved, False if rejected
-        reviewer_name: Name of the reviewer
-        rating: Star rating of the review
-        
-    Returns:
-        SMS confirmation message
+    Build confirmation SMS - keep it short.
     """
     stars = "⭐" * rating.value
     
     if approved:
-        message = f"""✅ Approved! Your reply to {reviewer_name}'s {rating.value}-star review is ready.
+        message = f"""✅ Approved!
 
-Copy it from the dashboard:
+Copy your reply to {reviewer_name}'s review:
 web-production-e56a13.up.railway.app/ops/dashboard"""
     else:
-        message = f"""👋 Skipped! Reply to {reviewer_name}'s {rating.value}-star review has been discarded.
+        message = f"""👋 Skipped!
 
-You can always respond manually later."""
+Reply to {reviewer_name} discarded."""
     
     return message
