@@ -31,10 +31,12 @@ class AIHandler:
         """
         self.api_key = api_key or Config.GEMINI_API_KEY
         self.model_name = model_name
-        self.dry_run = dry_run
+        self.dry_run = dry_run or Config.DRY_RUN_AI
         self.client = None
 
-        if not dry_run and self.api_key:
+        logger.info(f"AIHandler init: dry_run={self.dry_run}, has_api_key={bool(self.api_key)}")
+
+        if not self.dry_run and self.api_key:
             try:
                 import google.generativeai as genai
 
@@ -44,6 +46,9 @@ class AIHandler:
             except ImportError:
                 logger.warning("google-generativeai package not installed, using dry-run")
                 self.dry_run = True
+        elif not self.api_key:
+            logger.warning("No Gemini API key provided, using dry-run mode")
+            self.dry_run = True
         elif dry_run:
             logger.info("AI handler in DRY_RUN mode (mock responses)")
 
@@ -62,16 +67,22 @@ class AIHandler:
         Returns:
             AI-generated response text
         """
+        logger.info(f"generate_response called - dry_run={self.dry_run}, has_client={self.client is not None}")
+        
         if self.dry_run:
+            logger.info("Using mock response (dry_run=True)")
             return self._mock_response(review, business)
 
         if not self.client:
-            logger.error("AI client not initialized")
+            logger.error("AI client not initialized - falling back to mock")
             return self._mock_response(review, business)
 
         try:
             system_prompt = get_system_prompt()
             user_prompt = build_review_response_prompt(review, business)
+            
+            logger.info(f"Calling Gemini with model: {self.model_name}")
+            logger.debug(f"User prompt: {user_prompt[:200]}...")
 
             model = self.client.GenerativeModel(
                 self.model_name,
@@ -81,11 +92,11 @@ class AIHandler:
             response = model.generate_content(user_prompt)
             generated_text = response.text.strip()
 
-            logger.info(f"Generated response for review {review.id}")
+            logger.info(f"Generated response for review {review.id}: {generated_text[:100]}...")
             return generated_text
 
         except Exception as e:
-            logger.error(f"AI generation failed: {str(e)}")
+            logger.error(f"AI generation failed: {str(e)}", exc_info=True)
             return self._mock_response(review, business)
 
     def _mock_response(self, review: Review, business: Business) -> str:
