@@ -80,29 +80,31 @@ def build_sms_approval_message(
     rating: StarRating,
     review_text: str,
     draft_response: str,
+    approval_id: str = None,
 ) -> str:
     """
     Build the SMS message to send to the business owner for approval.
-    
-    Args:
-        reviewer_name: Name of the reviewer
-        rating: Star rating
-        review_text: The review text
-        draft_response: The AI-drafted response
-        
-    Returns:
-        SMS message string (under 160 chars ideally, but can be longer)
+    Short SMS with link to view full details on dashboard.
     """
     
     stars = "⭐" * rating.value
-    star_display = f"{rating.value}-star" if rating.value != 1 else "1-star"
     
-    message = f"""New {star_display} review {stars} from {reviewer_name}:
-"{review_text[:90]}{'...' if len(review_text) > 90 else ''}"
+    # Very short preview
+    review_preview = review_text[:60] + "..." if len(review_text) > 60 else review_text
+    draft_preview = draft_response[:80] + "..." if len(draft_response) > 80 else draft_response
+    
+    message = f"""📝 New {rating.value}-star review {stars}
 
-Draft reply: "{draft_response[:110]}{'...' if len(draft_response) > 110 else ''}"
+From: {reviewer_name}
+"{review_preview}"
 
-Reply YES to post, NO to skip."""
+Draft reply:
+"{draft_preview}"
+
+✅ Reply YES to approve
+❌ Reply NO to skip
+
+View dashboard: web-production-e56a13.up.railway.app/ops/dashboard"""
     
     return message
 
@@ -126,12 +128,13 @@ def build_sms_confirmation_message(
     stars = "⭐" * rating.value
     
     if approved:
-        message = f"""✅ Done! Your reply to {reviewer_name}'s {rating.value}-star review {stars} has been approved and is ready to post.
+        message = f"""✅ Approved! Your reply to {reviewer_name}'s {rating.value}-star review is ready.
 
-Thank you for using TradeReply!"""
+Copy it from the dashboard:
+web-production-e56a13.up.railway.app/ops/dashboard"""
     else:
-        message = f"""👋 No problem! Reply to {reviewer_name}'s {rating.value}-star review {stars} has been skipped.
+        message = f"""👋 Skipped! Reply to {reviewer_name}'s {rating.value}-star review has been discarded.
 
-You can always post a manual reply later. Thank you for using TradeReply!"""
+You can always respond manually later."""
     
     return message
