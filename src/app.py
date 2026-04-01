@@ -585,6 +585,7 @@ async def twilio_inbound_webhook(
                         approved=parsed,
                         reviewer_name=review.reviewer_name,
                         rating=review.rating,
+                        draft_response=draft.draft_text,
                     )
                     sms_handler.send_sms(
                         recipient_phone=normalized_phone,

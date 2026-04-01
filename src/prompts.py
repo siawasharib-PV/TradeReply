@@ -83,23 +83,23 @@ def build_sms_approval_message(
     approval_id: str = None,
 ) -> str:
     """
-    Build the SMS message with short previews of review and response.
+    Build the SMS message with full review and response.
+    Modern phones handle long SMS as concatenated messages.
     """
     
     stars = "⭐" * rating.value
     
-    # Short previews (truncate to fit SMS)
-    review_preview = review_text[:80] + "..." if len(review_text) > 80 else review_text
-    draft_preview = draft_response[:100] + "..." if len(draft_response) > 100 else draft_response
-    
-    message = f"""📝 New {rating.value}-star review {stars}
+    message = f"""📝 NEW {rating.value}-STAR REVIEW {stars}
 
-Review from {reviewer_name}:
-"{review_preview}"
+From: {reviewer_name}
 
-AI draft reply:
-"{draft_preview}"
+REVIEW:
+"{review_text}"
 
+AI DRAFT REPLY:
+"{draft_response}"
+
+---
 ✅ Reply YES to approve
 ❌ Reply NO to skip"""
     
@@ -110,20 +110,26 @@ def build_sms_confirmation_message(
     approved: bool,
     reviewer_name: str,
     rating: StarRating,
+    draft_response: str = None,
 ) -> str:
     """
-    Build confirmation SMS - keep it short.
+    Build confirmation SMS - include the response if approved.
     """
     stars = "⭐" * rating.value
     
     if approved:
-        message = f"""✅ Approved!
+        message = f"""✅ APPROVED!
 
-Copy your reply to {reviewer_name}'s review:
-web-production-e56a13.up.railway.app/ops/dashboard"""
+Your reply to {reviewer_name}'s {rating.value}-star review is ready to post:
+
+"{draft_response}"
+
+Copy this and paste it on your Google Business Profile."""
     else:
-        message = f"""👋 Skipped!
+        message = f"""👋 SKIPPED
 
-Reply to {reviewer_name} discarded."""
+Reply to {reviewer_name}'s {rating.value}-star review has been discarded.
+
+You can always respond manually on Google."""
     
     return message
