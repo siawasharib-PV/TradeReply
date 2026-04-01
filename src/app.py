@@ -1082,6 +1082,30 @@ async def debug_google_api(business_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/debug/config")
+async def debug_config():
+    """Debug endpoint: Show configuration status (without revealing secrets)"""
+    return {
+        "gemini_api_key_set": bool(config.GEMINI_API_KEY),
+        "twilio_configured": bool(config.TWILIO_ACCOUNT_SID and config.TWILIO_AUTH_TOKEN),
+        "google_oauth_configured": bool(config.GOOGLE_CLIENT_ID and config.GOOGLE_CLIENT_SECRET),
+        "dry_run_ai": config.DRY_RUN_AI,
+        "dry_run_sms": config.DRY_RUN_SMS,
+    }
+
+
+@app.get("/debug/config")
+async def debug_config():
+    """Debug endpoint: Check configuration status"""
+    return {
+        "has_gemini_key": bool(config.GEMINI_API_KEY),
+        "has_twilio_credentials": bool(config.TWILIO_ACCOUNT_SID and config.TWILIO_AUTH_TOKEN),
+        "has_google_oauth": bool(config.GOOGLE_CLIENT_ID and config.GOOGLE_CLIENT_SECRET),
+        "dry_run_ai": config.DRY_RUN_AI,
+        "dry_run_sms": config.DRY_RUN_SMS,
+    }
+
+
 @app.get("/debug/reviews/{business_id}")
 async def debug_business_reviews(business_id: str):
     """Debug endpoint: Get all reviews for a business"""
