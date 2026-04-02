@@ -595,7 +595,53 @@ async def twilio_inbound_webhook(
         except Exception as confirm_error:
             logger.warning(f"Failed to send confirmation SMS: {confirm_error}")
 
+        # If approved, auto-post to Google Business Profile
         if parsed:
+            try:
+                draft = db.get_draft_response(approval.draft_response_id)
+                if draft:
+                    review = db.get_review(draft.review_id)
+                    business = db.get_business(approval.business_id) if approval.business_id else None
+                    
+                    if review and business and review.google_review_name and business.google_refresh_token:
+                        from google_client import GoogleBusinessClient
+                        
+                        google_client = GoogleBusinessClient(
+                            client_id=config.GOOGLE_CLIENT_ID,
+                            client_secret=config.GOOGLE_CLIENT_SECRET,
+                            redirect_uri=config.GOOGLE_REDIRECT_URI,
+                            refresh_token=business.google_refresh_token,
+                        )
+                        
+                        result = google_client.post_reply(
+                            review_name=review.google_review_name,
+                            reply_text=draft.draft_text,
+                        )
+                        
+                        db.create_audit_event(
+                            event_type="google_reply_posted",
+                            business_id=approval.business_id,
+                            draft_id=approval.draft_response_id,
+                            approval_id=approval.id,
+                            message="Reply auto-posted to Google Business Profile",
+                            payload={"review_name": review.google_review_name, "result": str(result)},
+                        )
+                        logger.info(f"Auto-posted reply to Google for review {review.google_review_name}")
+                    else:
+                        missing = []
+                        if not review:
+                            missing.append("review")
+                        if not business:
+                            missing.append("business")
+                        if review and not review.google_review_name:
+                            missing.append("google_review_name")
+                        if business and not business.google_refresh_token:
+                            missing.append("google_refresh_token")
+                        logger.info(f"Skipping auto-post: missing {', '.join(missing)}")
+            except Exception as post_error:
+                logger.error(f"Failed to auto-post to Google: {post_error}")
+                # Don't fail the approval if auto-post fails
+            
             return "Approved. TradeReply recorded your YES response."
         return "Rejected. TradeReply recorded your NO response."
 
