@@ -19,3 +19,6 @@ twilio==9.0.0
 
 # HTTP Client
 requests==2.32.0
+
+# Payment Processing
+stripe==10.0.0

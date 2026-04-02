@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeReply - AI-Powered Review Responses</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+        }
+        
+        header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        
+        header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        .cta-button {
+            background: #3b82f6;
+            color: white;
+            padding: 15px 40px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+        
+        .cta-button:hover {
+            background: #2563eb;
+        }
+        
+        .how-it-works {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin: 60px 0;
+        }
+        
+        .step {
+            padding: 30px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .step h3 {
+            margin-bottom: 10px;
+            color: #1e3a8a;
+        }
+        
+        .step-number {
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 50%;
+            line-height: 50px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        
+        .pricing {
+            background: #f9fafb;
+            padding: 60px 20px;
+            margin: 60px 0;
+        }
+        
+        .pricing-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+        
+        .pricing-card {
+            background: white;
+            padding: 40px 30px;
+            border-radius: 12px;
+            border: 2px solid #e5e7eb;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .pricing-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .pricing-card h3 {
+            margin-bottom: 15px;
+            color: #1e3a8a;
+        }
+        
+        .price {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #1e3a8a;
+            margin: 20px 0;
+        }
+        
+        .price-period {
+            font-size: 0.9em;
+            color: #6b7280;
+        }
+        
+        .features {
+            list-style: none;
+            margin: 20px 0;
+        }
+        
+        .features li {
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .features li:before {
+            content: "✓ ";
+            color: #10b981;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        footer {
+            background: #1f2937;
+            color: white;
+            text-align: center;
+            padding: 30px 20px;
+            margin-top: 60px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>TradeReply</h1>
+        <p>Let AI handle your Google Business Profile reviews</p>
+        <p style="font-size: 1em; margin-top: 20px; opacity: 0.9;">Get professional responses in 30 seconds. Approve via SMS. Post to Google.</p>
+        <a href="/onboard" class="cta-button">Start Free Trial</a>
+    </header>
+    
+    <div class="container">
+        <h2 style="text-align: center; font-size: 2em; margin: 40px 0;">How It Works</h2>
+        
+        <div class="how-it-works">
+            <div class="step">
+                <div class="step-number">1</div>
+                <h3>Submit Review</h3>
+                <p>Paste a review from your Google Business Profile</p>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">2</div>
+                <h3>AI Drafts Response</h3>
+                <p>Get a professional reply in seconds. TradeReply uses AI to match your tone.</p>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">3</div>
+                <h3>Approve via SMS</h3>
+                <p>Get the draft via SMS. Reply YES to approve, NO to reject.</p>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">4</div>
+                <h3>Post to Google</h3>
+                <p>Copy the approved response and paste it into Google Business Profile.</p>
+            </div>
+        </div>
+        
+        <h2 style="text-align: center; font-size: 2em; margin: 60px 0 40px;">Why TradeReply?</h2>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; margin-bottom: 60px;">
+            <div style="padding: 20px;">
+                <h3 style="color: #1e3a8a; margin-bottom: 10px;">⚡ Save Time</h3>
+                <p>30 seconds per review instead of 5-10 minutes writing manually</p>
+            </div>
+            
+            <div style="padding: 20px;">
+                <h3 style="color: #1e3a8a; margin-bottom: 10px;">🤖 Professional Responses</h3>
+                <p>AI-powered drafts that sound authentic and professional</p>
+            </div>
+            
+            <div style="padding: 20px;">
+                <h3 style="color: #1e3a8a; margin-bottom: 10px;">📱 Mobile Friendly</h3>
+                <p>Approve responses right from your phone via SMS</p>
+            </div>
+            
+            <div style="padding: 20px;">
+                <h3 style="color: #1e3a8a; margin-bottom: 10px;">✅ You Stay in Control</h3>
+                <p>Approve every response before it goes to Google</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="pricing">
+        <div class="container">
+            <h2 style="text-align: center; font-size: 2em; margin-bottom: 40px;">Simple Pricing</h2>
+            
+            <div class="pricing-cards">
+                <div class="pricing-card">
+                    <h3>Solo</h3>
+                    <div class="price">$29<span class="price-period">/month</span></div>
+                    <p>Perfect for small businesses</p>
+                    <ul class="features">
+                        <li>Up to 20 reviews/month</li>
+                        <li>AI response drafting</li>
+                        <li>SMS approval</li>
+                        <li>Email support</li>
+                    </ul>
+                    <a href="/onboard" class="cta-button" style="width: 100%; text-align: center;">Get Started</a>
+                </div>
+                
+                <div class="pricing-card">
+                    <h3>Business</h3>
+                    <div class="price">$59<span class="price-period">/month</span></div>
+                    <p>For growing businesses</p>
+                    <ul class="features">
+                        <li>Up to 50 reviews/month</li>
+                        <li>AI response drafting</li>
+                        <li>SMS approval</li>
+                        <li>Priority support</li>
+                        <li>Custom response tone</li>
+                    </ul>
+                    <a href="/onboard" class="cta-button" style="width: 100%; text-align: center;">Get Started</a>
+                </div>
+                
+                <div class="pricing-card">
+                    <h3>Multi-Location</h3>
+                    <div class="price">$149<span class="price-period">/month</span></div>
+                    <p>For larger operations</p>
+                    <ul class="features">
+                        <li>Unlimited reviews</li>
+                        <li>Multiple locations</li>
+                        <li>AI response drafting</li>
+                        <li>SMS approval</li>
+                        <li>Priority support</li>
+                        <li>Dedicated manager</li>
+                    </ul>
+                    <a href="/onboard" class="cta-button" style="width: 100%; text-align: center;">Get Started</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h2 style="text-align: center; font-size: 2em; margin: 60px 0 40px;">Get Started in Minutes</h2>
+        <p style="text-align: center; font-size: 1.1em; margin-bottom: 30px;">No credit card required for the first 7 days.</p>
+        <div style="text-align: center;">
+            <a href="/onboard" class="cta-button">Start Free Trial</a>
+        </div>
+    </div>
+    
+    <footer>
+        <p>&copy; 2026 TradeReply. Built by Pada Ventures.</p>
+        <p style="margin-top: 10px; font-size: 0.9em;">
+            <a href="mailto:support@tradereply.com" style="color: #93c5fd; text-decoration: none;">Contact Support</a> | 
+            <a href="#" style="color: #93c5fd; text-decoration: none;">Privacy Policy</a> | 
+            <a href="#" style="color: #93c5fd; text-decoration: none;">Terms of Service</a>
+        </p>
+    </footer>
+</body>
+</html>

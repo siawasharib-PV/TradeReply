@@ -18,6 +18,8 @@ import uvicorn
 from db_helper import DatabaseHelper
 from ai_integration import AIHandler
 from sms_handler import SMSHandler
+from stripe_handler import StripeHandler, PRICING_PLANS
+from payment_routes import router as payment_router
 from prompts import build_sms_approval_message, build_sms_confirmation_message
 from models import (
     Business,
@@ -114,6 +116,20 @@ async def shutdown_event():
         logger.info("Database connection closed")
     except Exception as e:
         logger.error(f"Error closing database: {str(e)}")
+
+
+# ==================== LANDING PAGE ====================
+
+
+@app.get("/")
+async def landing_page():
+    """Serve landing page"""
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "landing.html"), "r") as f:
+            return HTMLResponse(content=f.read())
+    except Exception as e:
+        logger.error(f"Failed to load landing page: {e}")
+        return HTMLResponse(content="<h1>TradeReply</h1><p>AI-powered Google Business Profile review responses</p><a href='/onboard'>Get Started</a>")
 
 
 # ==================== HEALTH CHECK ====================
@@ -1612,6 +1628,32 @@ async def debug_database_status():
         }
     except Exception as e:
         return {"connected": False, "error": str(e)}
+
+
+@app.get("/debug/schema")
+async def debug_database_schema():
+    """Debug endpoint: Check database schema"""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(config.DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(businesses)")
+        columns = cursor.fetchall()
+        cursor.execute("SELECT * FROM businesses LIMIT 1")
+        sample = cursor.fetchone()
+        conn.close()
+        
+        return {
+            "database_path": config.DATABASE_PATH,
+            "businesses_columns": columns,
+            "sample_record": sample,
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__class__.__name__}
+
+
+# Include payment routes
+app.include_router(payment_router)
 
 
 def main():
