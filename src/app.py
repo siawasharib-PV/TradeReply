@@ -538,7 +538,17 @@ async def twilio_inbound_webhook(
 ):
     """Handle inbound YES/NO SMS replies from Twilio for approval requests."""
     try:
+        # Normalize phone number (handle +61, 0, etc)
         normalized_phone = From.strip()
+        if normalized_phone.startswith('+61'):
+            # Keep +61 format
+            pass
+        elif normalized_phone.startswith('61'):
+            # Convert 61 → +61
+            normalized_phone = '+' + normalized_phone
+        elif normalized_phone.startswith('0'):
+            # Convert 0402... → +61402...
+            normalized_phone = '+61' + normalized_phone[1:]
         response_text = Body.strip()
         logger.info(
             f"Inbound Twilio SMS from {normalized_phone} sid={MessageSid or 'n/a'} body={response_text!r}"
