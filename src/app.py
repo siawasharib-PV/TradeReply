@@ -129,7 +129,7 @@ async def landing_page():
             return HTMLResponse(content=f.read())
     except Exception as e:
         logger.error(f"Failed to load landing page: {e}")
-        return HTMLResponse(content="<h1>TradeReply</h1><p>AI-powered Google Business Profile review responses</p><a href='/onboard'>Get Started</a>")
+        return HTMLResponse(content="<h1>TradeReply</h1><p>AI-powered Google Business Profile review responses</p><a href='/onboard'>Get Started</a><p><a href='/health'>Health Check</a></p>")
 
 
 # ==================== HEALTH CHECK ====================
