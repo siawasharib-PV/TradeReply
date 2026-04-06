@@ -18,7 +18,7 @@ class AIHandler:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model_name: str = "gemini-2.0-flash",
+        model_name: str = "gemini-2.5-flash",
         dry_run: bool = False,
     ):
         """
