@@ -193,9 +193,9 @@ async def get_business(business_id: str):
     }
 
 
-@app.get("/businesses")
-async def list_businesses():
-    """List all businesses"""
+@app.get("/api/businesses")
+async def list_businesses_api():
+    """List all businesses (API)"""
     businesses = db.list_businesses()
     return [
         {
@@ -209,6 +209,40 @@ async def list_businesses():
         }
         for b in businesses
     ]
+
+
+@app.get("/businesses", response_class=HTMLResponse)
+async def list_businesses_html():
+    """List all businesses (UI)"""
+    businesses = db.list_businesses()
+    count = len(businesses)
+    cards = "".join([f'<div class="card"><h3>{b.name}</h3><p>ID: {b.id}</p><p>Phone: {b.phone or "N/A"}</p></div>' for b in businesses]) if businesses else '<p class="empty">No businesses yet. <a href="/onboard">Add one</a></p>'
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>TradeReply - Businesses</title>
+<style>
+* {{margin:0;padding:0;box-sizing:border-box}}
+body {{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1e3a8a,#3b82f6);min-height:100vh;padding:20px}}
+.container {{max-width:800px;margin:0 auto}}
+.header {{text-align:center;color:white;margin-bottom:30px}}
+.header h1 {{font-size:2.5em}}
+.nav {{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center}}
+.nav a {{color:#1e3a8a;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600}}
+.nav a:hover {{background:#e0f2fe}}
+.nav a.active {{background:#06b6d4;color:white}}
+.section {{background:white;border-radius:12px;padding:25px;box-shadow:0 4px 6px rgba(0,0,0,0.1)}}
+.section h2 {{color:#1e3a8a;margin-bottom:15px}}
+.card {{background:#f8fafc;padding:15px;border-radius:8px;margin-bottom:10px;border-left:4px solid #06b6d4}}
+.card h3 {{color:#1e3a8a;margin:0 0 5px 0}}
+.card p {{color:#64748b;font-size:0.9em;margin:3px 0}}
+.empty {{color:#94a3b8;text-align:center;padding:20px}}
+.empty a {{color:#06b6d4}}
+</style>
+</head><body><div class="container">
+<div class="header"><h1>🦞 TradeReply</h1><p>Your connected businesses</p></div>
+<div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review">Submit Review</a><a href="/businesses" class="active">Businesses</a><a href="/onboard">Add Business</a></div>
+<div class="section"><h2>📍 Businesses ({count})</h2>{cards}</div>
+</div></body></html>"""
+    return HTMLResponse(content=html)
 
 
 # ==================== REVIEW ENDPOINTS ====================
@@ -1456,7 +1490,7 @@ async def submit_review_page():
         
         <script>
             // Load businesses
-            fetch('/businesses')
+            fetch('/api/businesses')
                 .then(r => r.json())
                 .then(businesses => {
                     const select = document.getElementById('businessId');
