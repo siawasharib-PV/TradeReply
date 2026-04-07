@@ -1047,43 +1047,125 @@ async def ops_dashboard():
         return '<ul>' + ''.join(rows) + '</ul>'
 
     html = f"""
-    <html>
+    <!DOCTYPE html>
+    <html lang="en">
     <head>
-      <title>TradeReply Ops Dashboard</title>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>TradeReply Dashboard</title>
       <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f172a; color:#e2e8f0; margin:0; padding:24px; }}
-        .grid {{ display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-bottom:20px; }}
-        .card {{ background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; }}
-        h1,h2,h3 {{ margin-top:0; }}
-        .muted {{ color:#94a3b8; }}
-        ul {{ padding-left:18px; }}
-        code {{ color:#93c5fd; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); min-height: 100vh; padding: 20px; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .header {{ text-align: center; color: white; margin-bottom: 30px; }}
+        .header h1 {{ font-size: 2.5em; margin-bottom: 10px; }}
+        .header p {{ opacity: 0.9; }}
+        .nav {{ background: white; border-radius: 12px; padding: 15px 20px; margin-bottom: 20px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }}
+        .nav a {{ color: #1e3a8a; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; }}
+        .nav a:hover {{ background: #e0f2fe; }}
+        .nav a.active {{ background: #06b6d4; color: white; }}
+        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
+        .stat-card {{ background: white; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .stat-card .number {{ font-size: 3em; font-weight: bold; color: #1e3a8a; }}
+        .stat-card .label {{ color: #64748b; margin-top: 5px; }}
+        .section {{ background: white; border-radius: 12px; padding: 25px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .section h2 {{ color: #1e3a8a; margin-bottom: 15px; font-size: 1.5em; }}
+        .item {{ background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #06b6d4; }}
+        .item strong {{ color: #1e3a8a; }}
+        .item .muted {{ color: #64748b; font-size: 0.9em; }}
+        .empty {{ color: #94a3b8; text-align: center; padding: 20px; }}
+        .workflow {{ background: #f0f9ff; border-radius: 12px; padding: 20px; margin-bottom: 30px; }}
+        .workflow h2 {{ color: #1e3a8a; margin-bottom: 15px; }}
+        .workflow-steps {{ display: flex; gap: 15px; flex-wrap: wrap; }}
+        .workflow-step {{ background: white; padding: 15px 20px; border-radius: 8px; flex: 1; min-width: 150px; }}
+        .workflow-step .step-num {{ background: #06b6d4; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; margin-bottom: 8px; }}
+        .workflow-step .step-text {{ color: #1e3a8a; font-weight: 600; }}
+        .alert {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
+        .alert strong {{ color: #92400e; }}
+        ul {{ padding-left: 20px; }}
+        li {{ margin-bottom: 8px; list-style: none; }}
+        .muted {{ color: #64748b; }}
       </style>
     </head>
     <body>
-      <h1>TradeReply Ops Dashboard</h1>
-      <div class='muted'>Pilot operations view for pending approvals, ready-to-post replies, posted responses, and failures.</div>
-      <div class='grid'>
-        <div class='card'><h3>Businesses</h3><div>{len(businesses)}</div></div>
-        <div class='card'><h3>Pending approvals</h3><div>{len(pending)}</div></div>
-        <div class='card'><h3>Ready to post</h3><div>{len(ready)}</div></div>
-        <div class='card'><h3>Post failed</h3><div>{len(failed)}</div></div>
-      </div>
-      <div class='grid'>
-        <div class='card'><h3>Pending approvals</h3>{render_list(pending, 'pending')}</div>
-        <div class='card'><h3>Ready to post</h3>{render_list(ready, 'ready')}</div>
-      </div>
-      <div class='grid'>
-        <div class='card'><h3>Posted responses</h3>{render_list(posted, 'posted')}</div>
-        <div class='card'><h3>Failed posts</h3>{render_list(failed, 'failed')}</div>
-      </div>
-      <div class='card'>
-        <h3>Useful endpoints</h3>
-        <ul>
-          <li><code>GET /businesses/{{business_id}}/ready-to-post</code></li>
-          <li><code>POST /drafts/{{draft_id}}/manual-post</code> with <code>{{"action":"posted"}}</code></li>
-          <li><code>POST /drafts/{{draft_id}}/manual-post</code> with <code>{{"action":"post_failed"}}</code></li>
-        </ul>
+      <div class="container">
+        <div class="header">
+          <h1>🦞 TradeReply Dashboard</h1>
+          <p>Manage review responses for your business</p>
+        </div>
+        
+        <div class="nav">
+          <a href="/ops/dashboard" class="active">Dashboard</a>
+          <a href="/submit-review">Submit Review</a>
+          <a href="/businesses">Businesses</a>
+          <a href="/onboard">Add Business</a>
+        </div>
+        
+        <div class="alert">
+          <strong>📋 Current Workflow:</strong> Customers paste reviews on Submit Review page → AI generates response → SMS approval (YES/NO) → Manual copy/paste to Google
+        </div>
+        
+        <div class="stats">
+          <div class="stat-card">
+            <div class="number">{len(businesses)}</div>
+            <div class="label">Businesses</div>
+          </div>
+          <div class="stat-card">
+            <div class="number">{len(pending)}</div>
+            <div class="label">Pending Approvals</div>
+          </div>
+          <div class="stat-card">
+            <div class="number">{len(ready)}</div>
+            <div class="label">Ready to Post</div>
+          </div>
+          <div class="stat-card">
+            <div class="number">{len(posted)}</div>
+            <div class="label">Responses Posted</div>
+          </div>
+        </div>
+        
+        <div class="workflow">
+          <h2>How It Works</h2>
+          <div class="workflow-steps">
+            <div class="workflow-step">
+              <div class="step-num">1</div>
+              <div class="step-text">Customer gets review</div>
+            </div>
+            <div class="workflow-step">
+              <div class="step-num">2</div>
+              <div class="step-text">Paste on Submit Review page</div>
+            </div>
+            <div class="workflow-step">
+              <div class="step-num">3</div>
+              <div class="step-text">AI generates response</div>
+            </div>
+            <div class="workflow-step">
+              <div class="step-num">4</div>
+              <div class="step-text">SMS approval (YES/NO)</div>
+            </div>
+            <div class="workflow-step">
+              <div class="step-num">5</div>
+              <div class="step-text">Copy to Google</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="section">
+          <h2>⏳ Pending Approvals ({len(pending)})</h2>
+          {render_list(pending, 'pending') if pending else '<div class="empty">No pending approvals</div>'}
+        </div>
+        
+        <div class="section">
+          <h2>✅ Ready to Post ({len(ready)})</h2>
+          {render_list(ready, 'ready') if ready else '<div class="empty">No responses ready to post</div>'}
+        </div>
+        
+        <div class="section">
+          <h2>📤 Posted Responses ({len(posted)})</h2>
+          {render_list(posted, 'posted') if posted else '<div class="empty">No responses posted yet</div>'}
+        </div>
+        
+        {f'<div class="section"><h2>❌ Failed Posts ({len(failed)})</h2>{render_list(failed, "failed")}</div>' if failed else ''}
       </div>
     </body>
     </html>
