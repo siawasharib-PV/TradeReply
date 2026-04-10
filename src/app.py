@@ -1548,8 +1548,14 @@ async def onboard_page():
           body: JSON.stringify({name: businessName, phone: businessPhone})
         });
         if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Failed to create business');
+          let errMsg = 'Failed to create business';
+          try {
+            const err = await res.json();
+            if (typeof err.detail === 'string') errMsg = err.detail;
+            else if (Array.isArray(err.detail)) errMsg = err.detail.map(e => e.msg || e.message || JSON.stringify(e)).join(', ');
+            else errMsg = JSON.stringify(err);
+          } catch(_) {}
+          throw new Error(errMsg);
         }
         const data = await res.json();
         businessId = data.business_id;
