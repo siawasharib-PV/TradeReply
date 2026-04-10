@@ -146,25 +146,30 @@ async def health_check():
 
 @app.post("/businesses")
 async def create_business(
-    name: str,
-    phone: str,
-    sms_recipient: str,
-    description: Optional[str] = None,
-    google_location_id: Optional[str] = None,
-    google_account_id: Optional[str] = None,
-    response_tone: Optional[str] = None,
+    request: Request,
 ):
-    """Create a new business profile"""
+    """Create a new business profile (JSON body)"""
+    import json as _json
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    name = body.get("name")
+    phone = body.get("phone")
+    if not name or not phone:
+        raise HTTPException(status_code=400, detail="name and phone are required")
+
     business_id = str(uuid.uuid4())
     business = Business(
         id=business_id,
         name=name,
         phone=phone,
-        sms_recipient=sms_recipient,
-        description=description,
-        google_location_id=google_location_id,
-        google_account_id=google_account_id,
-        response_tone=response_tone,
+        sms_recipient=body.get("sms_recipient", phone),
+        description=body.get("description"),
+        google_location_id=body.get("google_location_id"),
+        google_account_id=body.get("google_account_id"),
+        response_tone=body.get("response_tone"),
     )
 
     if db.create_business(business):
@@ -867,31 +872,15 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
         )
         
         # Show success page with location info
-        location_display = discovered_location_name or ("Location configured" if discovered_location else "Location not set - add manually")
-        return HTMLResponse(
-            content=f"""
-            <html>
-            <head>
-                <title>TradeReply - Google Connected</title>
-                <style>
-                    body {{ font-family: -apple-system, sans-serif; background: #0f172a; color: white; text-align: center; padding: 60px; }}
-                    .card {{ background: #1e293b; padding: 40px; border-radius: 12px; max-width: 500px; margin: 0 auto; }}
-                    h1 {{ color: #22c55e; }}
-                    .muted {{ color: #94a3b8; }}
-                    .location {{ background: #334155; padding: 12px 20px; border-radius: 8px; margin: 20px 0; font-weight: 500; }}
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <h1>✅ Connected!</h1>
-                    <p>Your Google Business Profile is now linked to TradeReply.</p>
-                    <div class="location">📍 {location_display}</div>
-                    <p class="muted">New reviews will automatically generate AI responses for your approval via SMS.</p>
-                </div>
-            </body>
-            </html>
-            """
-        )
+        location_display = discovered_location_name or ("" if not discovered_location else "Location configured")
+        import urllib.parse
+        callback_params = urllib.parse.urlencode({
+            "connected": "1",
+            "name": business_name,
+            "phone": sms_recipient or "",
+            "location": location_display,
+        })
+        return RedirectResponse(url=f"/onboard?{callback_params}")
         
     except Exception as e:
         logger.error(f"Failed to handle Google callback: {e}")
@@ -1402,42 +1391,204 @@ async def submit_review_page():
 
 @app.get("/onboard", response_class=HTMLResponse)
 async def onboard_page():
-    """Simple onboarding page with Dashboard styling"""
+    """3-Step onboarding wizard: Business details → Google Connect → Done"""
     html = """
     <!DOCTYPE html>
     <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TradeReply - Add Business</title><style>
+    <title>TradeReply - Get Started</title><style>
     *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1e3a8a,#3b82f6);min-height:100vh;padding:20px}
-    .container{max-width:800px;margin:0 auto}.header{text-align:center;color:white;margin-bottom:30px}.header h1{font-size:2.5em}
+    .container{max-width:600px;margin:0 auto}
+    .header{text-align:center;color:white;margin-bottom:30px}
+    .header h1{font-size:2.5em;margin-bottom:4px}
+    .header p{opacity:0.9;font-size:18px}
     .nav{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center}
-    .nav a{color:#1e3a8a;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600}.nav a:hover{background:#e0f2fe}
-    .nav a.active{background:#06b6d4;color:white}.card{background:white;border-radius:12px;padding:40px;box-shadow:0 4px 6px rgba(0,0,0,0.1);text-align:center}
-    h2{color:#1e3a8a;font-size:1.5em;margin-bottom:12px}p{color:#64748b;font-size:16px;line-height:1.6;margin-bottom:30px;text-align:center}
-    .form-group{margin-bottom:20px;text-align:left}label{display:block;color:#1e3a8a;font-size:14px;margin-bottom:8px;font-weight:600}
-    input{width:100%;padding:14px 16px;font-size:16px;border:2px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#1e3a8a}
-    input:focus{outline:0;border-color:#06b6d4;background:white}input::placeholder{color:#94a3b8}
-    .btn{width:100%;background:#06b6d4;color:white;border:0;padding:16px;font-size:18px;font-weight:600;border-radius:8px;cursor:pointer}
-    .btn:hover{background:#0891b2}.btn:disabled{background:#94a3b8;cursor:not-allowed}
-    .success{background:#d1fae5;border:2px solid #10b981;border-radius:8px;padding:24px;margin-bottom:24px;display:none}
-    .success h3{color:#065f46;margin-bottom:8px}.success p{color:#047857;margin:0}
-    .features{margin-top:30px;padding-top:20px;border-top:1px solid #e2e8f0;text-align:left}
-    .feature{display:flex;align-items:center;gap:12px;padding:8px 0;color:#475569;font-size:15px}.check{color:#10b981}
+    .nav a{color:#1e3a8a;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600}
+    .nav a:hover{background:#e0f2fe}
+    .nav a.active{background:#06b6d4;color:white}
+    .card{background:white;border-radius:16px;padding:40px;box-shadow:0 8px 30px rgba(0,0,0,0.12);text-align:center}
+    /* Progress bar */
+    .steps{display:flex;justify-content:center;gap:0;margin-bottom:30px}
+    .step{display:flex;align-items:center;gap:0}
+    .step-circle{width:36px;height:36px;border-radius:50%;background:#e2e8f0;color:#94a3b8;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+    .step-circle.active{background:#06b6d4;color:white}
+    .step-circle.done{background:#10b981;color:white}
+    .step-line{width:40px;height:3px;background:#e2e8f0;margin:0 4px}
+    .step-line.done{background:#10b981}
+    /* Sections */
+    .step-content{display:none}
+    .step-content.active{display:block}
+    h2{color:#1e3a8a;font-size:1.5em;margin-bottom:8px}
+    .subtitle{color:#64748b;font-size:16px;line-height:1.6;margin-bottom:24px}
+    .form-group{margin-bottom:20px;text-align:left}
+    label{display:block;color:#1e3a8a;font-size:14px;margin-bottom:8px;font-weight:600}
+    input{width:100%;padding:14px 16px;font-size:16px;border:2px solid #e2e8f0;border-radius:10px;background:#f8fafc;color:#1e3a8a}
+    input:focus{outline:0;border-color:#06b6d4;background:white}
+    input::placeholder{color:#94a3b8}
+    .btn{width:100%;color:white;border:0;padding:16px;font-size:18px;font-weight:600;border-radius:10px;cursor:pointer;transition:all 0.2s}
+    .btn:hover{transform:translateY(-1px)}
+    .btn:disabled{opacity:0.6;cursor:not-allowed;transform:none}
+    .btn-primary{background:#06b6d4}.btn-primary:hover:not(:disabled){background:#0891b2}
+    .btn-google{background:#1e3a8a;display:flex;align-items:center;justify-content:center;gap:10px}
+    .btn-google:hover:not(:disabled){background:#1e40af}
+    .btn-skip{background:transparent;color:#94a3b8;border:2px solid #e2e8f0;margin-top:12px;font-size:16px}
+    .btn-skip:hover{color:#1e3a8a;border-color:#1e3a8a;background:#f8fafc}
+    .google-icon{width:24px;height:24px}
+    .features{margin-top:24px;padding-top:20px;border-top:1px solid #e2e8f0;text-align:left}
+    .feature{display:flex;align-items:center;gap:12px;padding:6px 0;color:#475569;font-size:14px}
+    .check{color:#10b981;font-size:18px}
+    .info-box{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:16px;text-align:left;margin-bottom:20px}
+    .info-box p{color:#0369a1;font-size:14px;margin:0}
+    .done-icon{font-size:64px;margin-bottom:16px}
+    .done-title{color:#065f46;font-size:24px;font-weight:700;margin-bottom:8px}
+    .done-subtitle{color:#047857;font-size:16px;margin-bottom:20px}
+    .done-details{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:left;margin-bottom:20px}
+    .done-details p{color:#166534;font-size:14px;margin:4px 0}
+    .done-details strong{color:#14532d}
+    .error-msg{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:12px;margin-bottom:16px;display:none;font-size:14px}
     </style></head><body><div class="container">
-    <div class="header"><h1>🦞 TradeReply</h1><p>Add your business to get started</p></div>
-    <div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review">Submit Review</a><a href="/businesses">Businesses</a><a href="/onboard" class="active">Add Business</a></div>
-    <div class="card"><h2>🏢 Connect Your Business</h2><p>Enter your business details to start receiving AI-powered review responses.</p>
-    <div id="success" class="success"><h3>✅ Business Added!</h3><p>You'll receive a confirmation SMS shortly.</p></div>
-    <form id="form">
-    <div class="form-group"><label for="name">Business Name</label><input type="text" id="name" name="name" placeholder="Your Business Name" required></div>
-    <div class="form-group"><label for="phone">Phone Number (for SMS approvals)</label><input type="tel" id="phone" name="phone" placeholder="+61400123456" required></div>
-    <button type="submit" class="btn" id="submitBtn">Add Business</button></form>
-    <div class="features">
-    <div class="feature"><span class="check">✓</span> AI-generated review responses</div>
-    <div class="feature"><span class="check">✓</span> SMS approval workflow</div>
-    <div class="feature"><span class="check">✓</span> Easy copy to Google Business Profile</div></div></div></div>
+    <div class="header"><h1>🦞 TradeReply</h1><p>Get started in 2 minutes</p></div>
+    <div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/businesses">Businesses</a><a href="/onboard" class="active">Setup</a></div>
+
+    <div class="card">
+    <!-- Progress -->
+    <div class="steps">
+      <div class="step"><div class="step-circle active" id="sc1">1</div></div>
+      <div class="step-line" id="sl1"></div>
+      <div class="step"><div class="step-circle" id="sc2">2</div></div>
+      <div class="step-line" id="sl2"></div>
+      <div class="step"><div class="step-circle" id="sc3">✓</div></div>
+    </div>
+
+    <!-- STEP 1: Business Details -->
+    <div class="step-content active" id="step1">
+      <h2>📝 Your Business Details</h2>
+      <p class="subtitle">We just need the basics to get started.</p>
+      <div id="error1" class="error-msg"></div>
+      <form id="form1">
+        <div class="form-group">
+          <label for="name">Business Name</label>
+          <input type="text" id="name" placeholder="e.g. Smith's Plumbing" required>
+        </div>
+        <div class="form-group">
+          <label for="phone">Mobile Number</label>
+          <input type="tel" id="phone" placeholder="+61 400 123 456" required>
+          <small style="color:#94a3b8;font-size:12px;margin-top:4px;display:block">We'll send SMS approvals to this number</small>
+        </div>
+        <button type="submit" class="btn btn-primary" id="btn1">Continue →</button>
+      </form>
+      <div class="features">
+        <div class="feature"><span class="check">✓</span> AI writes professional review responses</div>
+        <div class="feature"><span class="check">✓</span> Approve via SMS — no app needed</div>
+        <div class="feature"><span class="check">✓</span> Auto-post to Google (with connection)</div>
+      </div>
+    </div>
+
+    <!-- STEP 2: Google Connect -->
+    <div class="step-content" id="step2">
+      <h2>🔗 Connect Google Business</h2>
+      <p class="subtitle">Link your Google Business Profile so TradeReply can fetch reviews and post responses automatically.</p>
+      <div class="info-box">
+        <p>🔒 <strong>Secure:</strong> We only access reviews and replies. We never see or change anything else on your account.</p>
+      </div>
+      <button class="btn btn-google" id="btnGoogle" onclick="connectGoogle()">
+        <svg class="google-icon" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Connect Google Business Profile
+      </button>
+      <button class="btn btn-skip" onclick="skipGoogle()">Skip for now — I'll connect later</button>
+    </div>
+
+    <!-- STEP 3: Done -->
+    <div class="step-content" id="step3">
+      <div class="done-icon">🎉</div>
+      <div class="done-title">You're all set!</div>
+      <div class="done-subtitle" id="doneSubtitle">TradeReply is now watching your reviews.</div>
+      <div class="done-details" id="doneDetails">
+        <p><strong>Business:</strong> <span id="doneName">—</span></p>
+        <p><strong>SMS:</strong> <span id="donePhone">—</span></p>
+        <p><strong>Google:</strong> <span id="doneGoogle">Not connected</span></p>
+      </div>
+      <p class="subtitle" style="margin-top:16px">When a new review comes in, you'll get an SMS with the AI-written response. Just reply YES to approve or NO to reject.</p>
+      <a href="/ops/dashboard" class="btn btn-primary" style="display:block;text-decoration:none;margin-top:16px">Go to Dashboard →</a>
+    </div>
+    </div></div>
+
     <script>
-    document.getElementById('form').addEventListener('submit',async function(e){e.preventDefault();const b=document.getElementById('submitBtn');b.disabled=true;b.textContent='Adding...';try{const res=await fetch('/businesses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('name').value,phone:document.getElementById('phone').value})});if(res.ok){document.getElementById('success').style.display='block';this.reset()}else{const err=await res.json();alert('Error: '+(err.detail||JSON.stringify(err)))}}catch(err){alert('Error: '+err.message)}finally{b.disabled=false;b.textContent='Add Business'}});
-    </script></body></html>
+    let businessId = null;
+    let businessName = '';
+    let businessPhone = '';
+
+    function goStep(n) {
+      document.querySelectorAll('.step-content').forEach(el => el.classList.remove('active'));
+      document.getElementById('step' + n).classList.add('active');
+      for (let i = 1; i <= 3; i++) {
+        const sc = document.getElementById('sc' + i);
+        sc.classList.remove('active', 'done');
+        if (i < n) sc.classList.add('done');
+        else if (i === n) sc.classList.add('active');
+      }
+      for (let i = 1; i <= 2; i++) {
+        const sl = document.getElementById('sl' + i);
+        sl.classList.toggle('done', i < n);
+      }
+    }
+
+    document.getElementById('form1').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn1');
+      const errEl = document.getElementById('error1');
+      errEl.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
+        businessName = document.getElementById('name').value.trim();
+        businessPhone = document.getElementById('phone').value.trim();
+        const res = await fetch('/businesses', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name: businessName, phone: businessPhone})
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Failed to create business');
+        }
+        const data = await res.json();
+        businessId = data.business_id;
+        goStep(2);
+      } catch(err) {
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Continue →';
+      }
+    });
+
+    function connectGoogle() {
+      if (!businessId) return alert('Please complete step 1 first');
+      const state = encodeURIComponent('business_id=' + businessId + '&name=' + encodeURIComponent(businessName) + '&phone=' + encodeURIComponent(businessPhone));
+      window.location.href = '/google/auth?state=' + state;
+    }
+
+    function skipGoogle() {
+      document.getElementById('doneName').textContent = businessName;
+      document.getElementById('donePhone').textContent = businessPhone;
+      document.getElementById('doneGoogle').textContent = 'Not connected (connect anytime from Settings)';
+      goStep(3);
+    }
+
+    // Check if we're returning from Google OAuth
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('connected') === '1') {
+      const name = params.get('name') || 'Your Business';
+      const phone = params.get('phone') || '';
+      const location = params.get('location') || '';
+      document.getElementById('doneName').textContent = name;
+      document.getElementById('donePhone').textContent = phone;
+      document.getElementById('doneGoogle').textContent = location ? '✅ ' + location : '✅ Connected';
+      goStep(3);
+    }
+    </script>
+    </body></html>
     """
     return HTMLResponse(content=html)
 
