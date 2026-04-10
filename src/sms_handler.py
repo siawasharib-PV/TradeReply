@@ -60,6 +60,12 @@ class SMSHandler:
         Returns:
             Dict with 'success', 'message_sid' (if sent), and 'log' entry
         """
+        # Normalize phone for Twilio (+61 format)
+        phone = recipient_phone.strip().replace(" ", "").replace("-", "")
+        if phone.startswith('0'):
+            phone = '+61' + phone[1:]
+        elif phone.startswith('61'):
+            phone = '+' + phone
         timestamp = datetime.utcnow().isoformat()
 
         if self.dry_run or not self.client:

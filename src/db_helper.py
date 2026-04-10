@@ -456,25 +456,46 @@ class DatabaseHelper:
             for row in self.cursor.fetchall()
         ]
 
+    def _normalize_phone(self, phone: str) -> str:
+        """Normalize phone to +61XXXXXXXXX format."""
+        p = phone.strip().replace(" ", "").replace("-", "")
+        if p.startswith('+'):
+            return p
+        if p.startswith('61'):
+            return '+' + p
+        if p.startswith('0'):
+            return '+61' + p[1:]
+        return p
+
     def get_business_by_sms_recipient(self, sms_recipient: str) -> Optional[Business]:
-        """Find business by SMS recipient phone number."""
-        self.cursor.execute(
-            "SELECT * FROM businesses WHERE sms_recipient = ? LIMIT 1",
-            (sms_recipient,),
-        )
-        row = self.cursor.fetchone()
-        if row:
-            return Business(
-                id=row["id"],
-                name=row["name"],
-                phone=row["phone"],
-                sms_recipient=row["sms_recipient"],
-                description=row["description"],
-                google_location_id=row["google_location_id"] if "google_location_id" in row.keys() else None,
-                google_account_id=row["google_account_id"] if "google_account_id" in row.keys() else None,
-                response_tone=row["response_tone"] if "response_tone" in row.keys() else None,
-                created_at=datetime.fromisoformat(row["created_at"]),
+        """Find business by SMS recipient phone number (handles format variations)."""
+        normalized = self._normalize_phone(sms_recipient)
+        # Try exact match, then normalized variants
+        variants = [sms_recipient, normalized]
+        local = normalized[3:] if normalized.startswith('+61') else normalized  # strip +61 → 0XXXXXXXXX
+        if local and not local.startswith('0'):
+            local = '0' + local
+        variants.append(local)
+        variants.append('+61' + local[1:] if local.startswith('0') else local)
+        variants = list(dict.fromkeys(variants))  # deduplicate preserving order
+        for v in variants:
+            self.cursor.execute(
+                "SELECT * FROM businesses WHERE sms_recipient = ? OR phone = ? LIMIT 1",
+                (v, v),
             )
+            row = self.cursor.fetchone()
+            if row:
+                return Business(
+                    id=row["id"],
+                    name=row["name"],
+                    phone=row["phone"],
+                    sms_recipient=row["sms_recipient"],
+                    description=row["description"],
+                    google_location_id=row["google_location_id"] if "google_location_id" in row.keys() else None,
+                    google_account_id=row["google_account_id"] if "google_account_id" in row.keys() else None,
+                    response_tone=row["response_tone"] if "response_tone" in row.keys() else None,
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
         return None
 
     def get_latest_pending_approval_by_phone(self, sms_recipient: str) -> Optional[PendingApproval]:

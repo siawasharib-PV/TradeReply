@@ -601,7 +601,7 @@ async def twilio_inbound_webhook(
                 payload={"from": normalized_phone, "body": response_text, "message_sid": MessageSid},
             )
             logger.warning(f"No pending approval found for inbound SMS from {normalized_phone}")
-            return "No pending approval found for this number."
+            return ""  # Silent — don't confuse customers with error texts
 
         parsed = sms_handler.parse_approval_response(response_text)
         timestamp = datetime.utcnow()
