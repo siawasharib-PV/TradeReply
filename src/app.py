@@ -906,11 +906,33 @@ async def sync_google_reviews(business_id: str):
                 detail="Google not connected. Complete OAuth flow first."
             )
         
+        # Auto-discover location if not set
         if not business.google_location_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Google location ID not set. Please configure location."
-            )
+            try:
+                client_for_discovery = GoogleBusinessClient(
+                    client_id=config.GOOGLE_CLIENT_ID,
+                    client_secret=config.GOOGLE_CLIENT_SECRET,
+                    redirect_uri=config.GOOGLE_REDIRECT_URI,
+                    refresh_token=business.google_refresh_token,
+                )
+                accounts = client_for_discovery.get_accounts()
+                if accounts:
+                    account_name = accounts[0].get("name", "")
+                    locations = client_for_discovery.get_locations(account_name)
+                    if locations:
+                        first_location = locations[0]
+                        discovered_id = first_location.get("name")
+                        db.update_business_mapping(business_id, google_location_id=discovered_id)
+                        business = db.get_business(business_id)  # refresh
+                        logger.info(f"Auto-discovered location for business {business_id}: {discovered_id}")
+            except Exception as discovery_err:
+                logger.warning(f"Could not auto-discover location: {discovery_err}")
+            
+            if not business.google_location_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Google location ID not set and auto-discovery failed. Please configure location."
+                )
         
         # Initialize Google client with stored refresh token
         client = GoogleBusinessClient(
@@ -1633,6 +1655,139 @@ async def debug_database_schema():
         }
     except Exception as e:
         return {"error": str(e), "type": type(e).__class__.__name__}
+
+
+# ==================== SCHEDULED SYNC ====================
+
+
+@app.post("/cron/sync-all-reviews")
+async def cron_sync_all_reviews():
+    """
+    Scheduled endpoint to sync reviews for all businesses with Google connected.
+    Call this from a cron job (e.g. every 5 minutes).
+    """
+    try:
+        businesses = db.list_businesses()
+        results = []
+        
+        for business in businesses:
+            if not business.google_refresh_token:
+                continue
+            
+            try:
+                from google_client import GoogleBusinessClient, parse_google_review
+                
+                client = GoogleBusinessClient(
+                    client_id=config.GOOGLE_CLIENT_ID,
+                    client_secret=config.GOOGLE_CLIENT_SECRET,
+                    redirect_uri=config.GOOGLE_REDIRECT_URI,
+                    refresh_token=business.google_refresh_token,
+                )
+                
+                # Auto-discover location if needed
+                location_id = business.google_location_id
+                if not location_id:
+                    try:
+                        accounts = client.get_accounts()
+                        if accounts:
+                            account_name = accounts[0].get("name", "")
+                            locations = client.get_locations(account_name)
+                            if locations:
+                                location_id = locations[0].get("name")
+                                db.update_business_mapping(business.id, google_location_id=location_id)
+                                logger.info(f"[CRON] Auto-discovered location for {business.name}: {location_id}")
+                    except Exception as e:
+                        logger.warning(f"[CRON] Location discovery failed for {business.name}: {e}")
+                        results.append({"business": business.name, "status": "no_location"})
+                        continue
+                
+                if not location_id:
+                    results.append({"business": business.name, "status": "no_location"})
+                    continue
+                
+                # Fetch reviews
+                result = client.get_reviews(location_id)
+                reviews = result.get("reviews", [])
+                
+                new_count = 0
+                for google_review in reviews:
+                    parsed = parse_google_review(google_review)
+                    
+                    # Skip if already has a reply
+                    if parsed.get("has_reply"):
+                        continue
+                    
+                    # Skip if we already processed this review
+                    existing = db.get_review_by_google_id(parsed["google_review_id"])
+                    if existing:
+                        continue
+                    
+                    # Create review record
+                    review_id = str(uuid.uuid4())
+                    review = Review(
+                        id=review_id,
+                        business_id=business.id,
+                        reviewer_name=parsed["reviewer_name"],
+                        rating=StarRating(parsed["rating"]),
+                        review_text=parsed["review_text"],
+                        google_review_id=parsed["google_review_id"],
+                        google_review_name=parsed["google_review_name"],
+                    )
+                    db.create_review(review)
+                    
+                    # Generate AI response
+                    draft_text = ai_handler.generate_response(review, business)
+                    draft_id = str(uuid.uuid4())
+                    draft = DraftResponse(
+                        id=draft_id,
+                        review_id=review_id,
+                        business_id=business.id,
+                        draft_text=draft_text,
+                        status="drafted",
+                    )
+                    db.create_draft_response(draft)
+                    
+                    # Send SMS approval
+                    sms_message = build_sms_approval_message(
+                        parsed["reviewer_name"],
+                        StarRating(parsed["rating"]),
+                        parsed["review_text"],
+                        draft_text,
+                    )
+                    sms_handler.send_approval_request(business.sms_recipient, sms_message)
+                    
+                    # Create pending approval
+                    approval = PendingApproval(
+                        id=str(uuid.uuid4()),
+                        draft_response_id=draft_id,
+                        business_id=business.id,
+                        sms_sent_at=datetime.utcnow(),
+                        status=ApprovalStatus.PENDING,
+                        sms_message=sms_message,
+                    )
+                    db.create_pending_approval(approval)
+                    new_count += 1
+                    
+                    db.create_audit_event(
+                        event_type="cron_review_detected",
+                        business_id=business.id,
+                        review_id=review_id,
+                        message=f"[CRON] New review detected from {parsed['reviewer_name']}",
+                        payload={"rating": parsed["rating"]},
+                    )
+                
+                results.append({"business": business.name, "total": len(reviews), "new": new_count, "status": "synced"})
+                logger.info(f"[CRON] Synced {business.name}: {new_count} new reviews out of {len(reviews)}")
+                
+            except Exception as e:
+                logger.error(f"[CRON] Failed to sync {business.name}: {e}")
+                results.append({"business": business.name, "status": "error", "error": str(e)})
+        
+        return {"synced_at": datetime.utcnow().isoformat(), "results": results}
+        
+    except Exception as e:
+        logger.error(f"[CRON] Sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Include payment routes
