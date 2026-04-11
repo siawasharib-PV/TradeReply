@@ -115,15 +115,60 @@ async def startup_event():
                 businesses = db.list_businesses()
                 google_businesses = [b for b in businesses if b.google_refresh_token]
                 if google_businesses:
-                    logger.info(f"[SYNC] Checking {len(google_businesses)} connected businesses for new reviews...")
-                    import requests as sync_requests
-                    base_url = f"http://localhost:{config.PORT}"
-                    resp = sync_requests.post(f"{base_url}/cron/sync-all-reviews", timeout=120)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            logger.info(f"[SYNC] Results: {data.get('results', [])}")
-                        else:
-                            logger.warning(f"[SYNC] Failed: {resp.status_code}")
+                    logger.info(f"[SYNC] Checking {len(google_businesses)} connected businesses...")
+                    # Sync inline to avoid HTTP self-call issues
+                    for business in google_businesses:
+                        try:
+                            from google_client import GoogleBusinessClient, parse_google_review
+                            client = GoogleBusinessClient(
+                                client_id=config.GOOGLE_CLIENT_ID,
+                                client_secret=config.GOOGLE_CLIENT_SECRET,
+                                redirect_uri=config.GOOGLE_REDIRECT_URI,
+                                refresh_token=business.google_refresh_token,
+                            )
+                            location_id = business.google_location_id
+                            if not location_id:
+                                try:
+                                    accounts = client.get_accounts()
+                                    if accounts:
+                                        locations = client.get_locations(accounts[0].get("name", ""))
+                                        if locations:
+                                            location_id = locations[0].get("name")
+                                            db.update_business_mapping(business.id, google_location_id=location_id)
+                                except Exception:
+                                    pass
+                            if not location_id:
+                                continue
+                            result = client.get_reviews(location_id)
+                            for gr in result.get("reviews", []):
+                                parsed = parse_google_review(gr)
+                                if parsed.get("has_reply") or db.get_review_by_google_id(parsed["google_review_id"]):
+                                    continue
+                                rid = str(uuid.uuid4())
+                                rev = Review(id=rid, business_id=business.id,
+                                    reviewer_name=parsed["reviewer_name"],
+                                    rating=StarRating(parsed["rating"]),
+                                    review_text=parsed["review_text"],
+                                    google_review_id=parsed["google_review_id"],
+                                    google_review_name=parsed["google_review_name"])
+                                db.create_review(rev)
+                                draft_text = ai_handler.generate_response(rev, business)
+                                dr = DraftResponse(id=str(uuid.uuid4()), review_id=rid,
+                                    business_id=business.id, draft_text=draft_text, status="drafted")
+                                db.create_draft_response(dr)
+                                sms_msg = build_sms_approval_message(parsed["reviewer_name"],
+                                    StarRating(parsed["rating"]), parsed["review_text"], draft_text)
+                                sms_handler.send_approval_request(business.sms_recipient, sms_msg)
+                                appr = PendingApproval(id=str(uuid.uuid4()),
+                                    draft_response_id=dr.id, business_id=business.id,
+                                    sms_sent_at=datetime.utcnow(), status=ApprovalStatus.PENDING,
+                                    sms_message=sms_msg)
+                                db.create_pending_approval(appr)
+                                logger.info(f"[SYNC] New review: {parsed['reviewer_name']} for {business.name}")
+                        except Exception as biz_err:
+                            logger.error(f"[SYNC] Error syncing {business.name}: {biz_err}")
+                else:
+                    logger.debug("[SYNC] No Google-connected businesses")
             except Exception as e:
                 logger.error(f"[SYNC] Periodic sync error: {e}")
             await asyncio.sleep(300)  # Every 5 minutes
