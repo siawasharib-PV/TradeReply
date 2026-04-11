@@ -98,14 +98,37 @@ class GoogleConnectRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """Initialize database on startup and start background review sync"""
     try:
         db.connect()
         db.init_schema()
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {str(e)}")
-        # Don't crash - let the app start anyway
+    
+    # Start background review sync every 5 minutes
+    import asyncio
+    async def periodic_sync():
+        await asyncio.sleep(60)  # Wait 1 min for app to fully start
+        while True:
+            try:
+                businesses = db.list_businesses()
+                google_businesses = [b for b in businesses if b.google_refresh_token]
+                if google_businesses:
+                    logger.info(f"[SYNC] Checking {len(google_businesses)} connected businesses for new reviews...")
+                    import requests as sync_requests
+                    base_url = f"http://localhost:{config.PORT}"
+                    resp = sync_requests.post(f"{base_url}/cron/sync-all-reviews", timeout=120)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            logger.info(f"[SYNC] Results: {data.get('results', [])}")
+                        else:
+                            logger.warning(f"[SYNC] Failed: {resp.status_code}")
+            except Exception as e:
+                logger.error(f"[SYNC] Periodic sync error: {e}")
+            await asyncio.sleep(300)  # Every 5 minutes
+    
+    asyncio.create_task(periodic_sync())
 
 
 @app.on_event("shutdown")
