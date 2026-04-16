@@ -414,6 +414,279 @@ def _build_business_summary(business: Business) -> dict:
     }
 
 
+def _format_timestamp(value: Optional[str]) -> str:
+    if not value:
+        return "Not yet"
+    try:
+        dt = datetime.fromisoformat(value)
+        return dt.strftime("%d %b %Y, %I:%M %p")
+    except Exception:
+        return value
+
+
+def _truncate_text(value: Optional[str], limit: int = 120) -> str:
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text or "No text provided."
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _rating_stars(rating: StarRating) -> str:
+    return "★" * int(rating.value) + "☆" * (5 - int(rating.value))
+
+
+def _review_stage_label(draft: Optional[DraftResponse], response_posted: bool) -> str:
+    if response_posted:
+        return "Posted"
+    if not draft:
+        return "Received"
+    mapping = {
+        "drafted": "Drafted",
+        "awaiting_approval": "Awaiting approval",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "posted": "Posted",
+        "post_failed": "Post failed",
+        "sms_failed": "SMS failed",
+        "invalid_response": "Needs follow-up",
+    }
+    return mapping.get(draft.status, draft.status.replace("_", " ").title())
+
+
+def _render_business_dashboard_page(business: Business, flash_message: str = "", error_message: str = "") -> HTMLResponse:
+    summary = _build_business_summary(business)
+    metrics = summary["metrics"]
+    reviews = db.get_reviews_by_business(business.id)[:8]
+    responses = db.get_responses_by_business(business.id)
+    responses_by_review = {response.review_id: response for response in responses}
+    pending_approvals = db.get_pending_approvals_by_business(business.id)[:6]
+    activity = db.list_audit_events(limit=12, business_id=business.id)
+
+    review_rows = []
+    for review in reviews:
+        draft = db.get_draft_by_review(review.id)
+        posted_response = responses_by_review.get(review.id)
+        stage = _review_stage_label(draft, bool(posted_response))
+        reply_preview = posted_response.response_text if posted_response else (draft.draft_text if draft else "")
+        review_rows.append(
+            f"""
+            <div class="review-row">
+              <div class="review-top">
+                <div>
+                  <strong>{review.reviewer_name}</strong>
+                  <span class="stars">{_rating_stars(review.rating)}</span>
+                </div>
+                <span class="status-pill">{stage}</span>
+              </div>
+              <p class="review-text">{_truncate_text(review.review_text, 180)}</p>
+              <p class="reply-preview"><strong>Reply:</strong> {_truncate_text(reply_preview, 160) if reply_preview else 'Not drafted yet.'}</p>
+              <div class="review-meta">Received {_format_timestamp(review.created_at.isoformat())}</div>
+            </div>
+            """
+        )
+
+    approvals_html = "".join(
+        [
+            f"""
+            <div class="list-row">
+              <div>
+                <strong>Approval {approval.id[:8]}</strong>
+                <p>SMS sent {_format_timestamp(approval.sms_sent_at.isoformat())}</p>
+              </div>
+              <a href="/approvals/edit?token={_generate_approval_token(approval.id)}" class="text-link">Open edit page</a>
+            </div>
+            """
+            for approval in pending_approvals
+        ]
+    ) or '<div class="empty">No approvals waiting right now.</div>'
+
+    activity_html = "".join(
+        [
+            f"""
+            <div class="activity-row">
+              <div>
+                <strong>{event['event_type'].replace('_', ' ').title()}</strong>
+                <p>{event['message'] or 'Activity recorded'}</p>
+              </div>
+              <span>{_format_timestamp(event['created_at'])}</span>
+            </div>
+            """
+            for event in activity
+        ]
+    ) or '<div class="empty">No activity yet.</div>'
+
+    setup_items = [
+        ("Business created", True),
+        ("SMS number saved", bool(business.sms_recipient)),
+        ("Google connected", bool(business.google_refresh_token)),
+        ("Google location mapped", bool(business.google_location_id)),
+        ("First reply posted", metrics["posted"] > 0),
+    ]
+    checklist_html = "".join(
+        [
+            f'<div class="check-row"><span class="check-icon {"done" if done else "todo"}">{"✓" if done else "•"}</span><span>{label}</span></div>'
+            for label, done in setup_items
+        ]
+    )
+
+    response_examples_html = "".join(
+        [
+            f"""
+            <div class="list-row">
+              <div>
+                <strong>{db.get_review(response.review_id).reviewer_name if db.get_review(response.review_id) else 'Customer reply'}</strong>
+                <p>{_truncate_text(response.response_text, 120)}</p>
+              </div>
+              <span>{_format_timestamp(response.posted_at.isoformat())}</span>
+            </div>
+            """
+            for response in responses[:5]
+        ]
+    ) or '<div class="empty">No replies have been posted yet.</div>'
+
+    flash_html = f'<div class="banner success">{flash_message}</div>' if flash_message else ""
+    error_html = f'<div class="banner error">{error_message}</div>' if error_message else ""
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>TradeReply - {business.name}</title>
+      <style>
+        * {{ margin:0; padding:0; box-sizing:border-box; }}
+        body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%); min-height:100vh; padding:20px; color:#0f172a; }}
+        .container {{ max-width:1200px; margin:0 auto; }}
+        .nav {{ background:white; border-radius:14px; padding:14px 18px; margin-bottom:20px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
+        .nav a {{ color:#1e3a8a; text-decoration:none; padding:10px 16px; border-radius:10px; font-weight:600; }}
+        .nav a:hover {{ background:#e0f2fe; }}
+        .nav a.active {{ background:#06b6d4; color:white; }}
+        .hero {{ background:white; border-radius:22px; padding:28px; box-shadow:0 12px 32px rgba(0,0,0,0.12); margin-bottom:20px; }}
+        .banner {{ border-radius:14px; padding:16px 18px; margin-bottom:18px; font-weight:600; box-shadow:0 10px 28px rgba(0,0,0,0.08); }}
+        .banner.success {{ background:#ecfdf5; color:#166534; border:1px solid #86efac; }}
+        .banner.error {{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }}
+        .hero-top {{ display:flex; justify-content:space-between; gap:20px; align-items:flex-start; flex-wrap:wrap; }}
+        .eyebrow {{ display:inline-flex; align-items:center; gap:8px; background:#ecfeff; color:#0f766e; padding:8px 12px; border-radius:999px; font-size:14px; font-weight:700; margin-bottom:14px; }}
+        h1 {{ color:#1e3a8a; font-size:2.25rem; margin-bottom:8px; }}
+        .hero p {{ color:#475569; line-height:1.6; max-width:720px; }}
+        .hero-actions {{ display:flex; gap:12px; flex-wrap:wrap; margin-top:18px; }}
+        .btn {{ display:inline-flex; align-items:center; justify-content:center; gap:8px; text-decoration:none; border-radius:12px; padding:12px 16px; font-weight:700; }}
+        .btn-primary {{ background:#06b6d4; color:white; }}
+        .btn-secondary {{ background:#eff6ff; color:#1e3a8a; }}
+        .hero-meta {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-top:22px; }}
+        .meta-card {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:16px; }}
+        .meta-card span {{ display:block; color:#64748b; font-size:13px; margin-bottom:8px; }}
+        .meta-card strong {{ color:#1e3a8a; font-size:1rem; }}
+        .stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:20px; }}
+        .stat-card {{ background:white; border-radius:18px; padding:22px; box-shadow:0 10px 28px rgba(0,0,0,0.10); }}
+        .stat-card .value {{ color:#1e3a8a; font-size:2rem; font-weight:800; }}
+        .stat-card .label {{ color:#64748b; margin-top:6px; font-size:14px; }}
+        .grid {{ display:grid; grid-template-columns:2fr 1fr; gap:20px; }}
+        .section {{ background:white; border-radius:18px; padding:22px; box-shadow:0 10px 28px rgba(0,0,0,0.10); margin-bottom:20px; }}
+        .section h2 {{ color:#1e3a8a; margin-bottom:8px; }}
+        .section p.section-copy {{ color:#64748b; margin-bottom:18px; line-height:1.5; }}
+        .review-row, .list-row, .activity-row {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:16px; margin-bottom:12px; }}
+        .review-top, .list-row, .activity-row {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
+        .stars {{ color:#f59e0b; margin-left:8px; font-size:14px; }}
+        .status-pill {{ background:#e0f2fe; color:#0f766e; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; white-space:nowrap; }}
+        .review-text, .reply-preview, .list-row p, .activity-row p {{ color:#475569; line-height:1.5; margin-top:10px; }}
+        .review-meta, .activity-row span {{ color:#94a3b8; font-size:13px; margin-top:10px; white-space:nowrap; }}
+        .empty {{ padding:18px; border-radius:14px; background:#f8fafc; color:#94a3b8; text-align:center; }}
+        .check-row {{ display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid #e2e8f0; color:#334155; }}
+        .check-row:last-child {{ border-bottom:0; }}
+        .check-icon {{ width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-weight:800; }}
+        .check-icon.done {{ background:#dcfce7; color:#166534; }}
+        .check-icon.todo {{ background:#e2e8f0; color:#64748b; }}
+        .text-link {{ color:#0891b2; font-weight:700; text-decoration:none; }}
+        @media (max-width: 900px) {{
+          .grid {{ grid-template-columns:1fr; }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="nav">
+          <a href="/ops/dashboard">All Businesses</a>
+          <a href="/businesses" class="active">Businesses</a>
+          <a href="/submit-review">Submit Review</a>
+          <a href="/onboard">Add Business</a>
+        </div>
+
+        {flash_html}
+        {error_html}
+
+        <div class="hero">
+          <div class="hero-top">
+            <div>
+              <div class="eyebrow">Business dashboard</div>
+              <h1>{business.name}</h1>
+              <p>This workspace is only for <strong>{business.name}</strong>. Reviews, drafts, approvals, and posted replies are filtered to this business so nothing overlaps with any other customer account.</p>
+              <div class="hero-actions">
+                <a class="btn btn-primary" href="/businesses/{business.id}/sync-reviews">Check for new Google reviews</a>
+                <a class="btn btn-secondary" href="/businesses/{business.id}/approvals">View approvals</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-meta">
+            <div class="meta-card"><span>SMS approvals</span><strong>{business.sms_recipient or 'Not configured'}</strong></div>
+            <div class="meta-card"><span>Google connection</span><strong>{'Connected' if summary['google_connected'] else 'Not connected yet'}</strong></div>
+            <div class="meta-card"><span>Google location</span><strong>{business.google_location_id or 'Not mapped yet'}</strong></div>
+            <div class="meta-card"><span>Reply tone</span><strong>{business.response_tone or 'Professional default'}</strong></div>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat-card"><div class="value">{metrics['reviews_received']}</div><div class="label">Reviews received</div></div>
+          <div class="stat-card"><div class="value">{metrics['drafts_generated']}</div><div class="label">Drafts generated</div></div>
+          <div class="stat-card"><div class="value">{metrics['awaiting_approval']}</div><div class="label">Awaiting approval</div></div>
+          <div class="stat-card"><div class="value">{metrics['posted']}</div><div class="label">Replies posted</div></div>
+          <div class="stat-card"><div class="value">{int(metrics['approval_rate'] * 100) if metrics['approval_rate'] else 0}%</div><div class="label">Approval rate</div></div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <div class="section">
+              <h2>Review pipeline</h2>
+              <p class="section-copy">This shows the latest review activity for {business.name}, including where each review is sitting in the workflow.</p>
+              {''.join(review_rows) if review_rows else '<div class="empty">No reviews have been received for this business yet.</div>'}
+            </div>
+
+            <div class="section">
+              <h2>Recent posted replies</h2>
+              <p class="section-copy">A quick snapshot of what TradeReply has already published for this business.</p>
+              {response_examples_html}
+            </div>
+          </div>
+
+          <div>
+            <div class="section">
+              <h2>Setup checklist</h2>
+              <p class="section-copy">A simple way to see what still needs attention before this business is fully automated.</p>
+              {checklist_html}
+            </div>
+
+            <div class="section">
+              <h2>Pending approvals</h2>
+              <p class="section-copy">If the owner needs to review or edit a reply, it will appear here.</p>
+              {approvals_html}
+            </div>
+
+            <div class="section">
+              <h2>Recent activity</h2>
+              <p class="section-copy">Every important action for this business is tracked here.</p>
+              {activity_html}
+            </div>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
 def _load_approval_context_or_404(approval_id: str) -> tuple[PendingApproval, DraftResponse, Review, Business]:
     approval = db.get_pending_approval(approval_id)
     if not approval:
@@ -647,6 +920,31 @@ async def get_business_metrics_api(business_id: str):
     }
 
 
+@app.get("/businesses/{business_id}/dashboard", response_class=HTMLResponse)
+async def business_dashboard_html(
+    business_id: str,
+    synced: Optional[int] = None,
+    error: Optional[str] = None,
+):
+    """Dedicated dashboard for one business so data never overlaps with another account."""
+    business = db.get_business(business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    flash_message = ""
+    if synced is not None:
+        flash_message = (
+            "We checked Google and did not find any new reviews just yet."
+            if synced == 0
+            else f"We found {synced} new review{'s' if synced != 1 else ''} and pushed them into the reply flow."
+        )
+    error_message = error or ""
+    return _render_business_dashboard_page(
+        business,
+        flash_message=flash_message,
+        error_message=error_message,
+    )
+
+
 @app.get("/businesses", response_class=HTMLResponse)
 async def list_businesses_html():
     """List all businesses (UI)"""
@@ -656,17 +954,30 @@ async def list_businesses_html():
     for b in businesses:
         summary = _build_business_summary(b)
         metrics = summary["metrics"]
+        last_seen = _format_timestamp(metrics["last_review_at"])
         cards += f"""
         <div class="card">
-          <h3>{b.name}</h3>
+          <div class="card-top">
+            <div>
+              <h3>{b.name}</h3>
+              <p class="status-line">{"Google connected" if summary["google_connected"] else "Needs Google connection"} • Last review: {last_seen}</p>
+            </div>
+            <a class="btn-link" href="/businesses/{b.id}/dashboard">Open dashboard</a>
+          </div>
           <p><strong>Phone:</strong> {b.phone or "N/A"}</p>
           <p><strong>SMS:</strong> {b.sms_recipient or "N/A"}</p>
           <p><strong>Google:</strong> {"Connected" if summary["google_connected"] else "Not connected"}</p>
+          <p><strong>Location:</strong> {summary["google_location_id"] or "Not mapped yet"}</p>
           <div class="mini-stats">
             <span>Reviews: {metrics['reviews_received']}</span>
             <span>Drafts: {metrics['drafts_generated']}</span>
-            <span>Approved: {metrics['approved'] + metrics['posted']}</span>
+            <span>Awaiting: {metrics['awaiting_approval']}</span>
             <span>Posted: {metrics['posted']}</span>
+          </div>
+          <div class="card-actions">
+            <a href="/businesses/{b.id}/approvals">Approvals</a>
+            <a href="/businesses/{b.id}/dashboard">Replies</a>
+            <a href="/businesses/{b.id}/debug-google">Google debug</a>
           </div>
         </div>
         """
@@ -687,10 +998,14 @@ body {{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1
 .section {{background:white;border-radius:12px;padding:25px;box-shadow:0 4px 6px rgba(0,0,0,0.1)}}
 .section h2 {{color:#1e3a8a;margin-bottom:15px}}
 .card {{background:#f8fafc;padding:15px;border-radius:8px;margin-bottom:10px;border-left:4px solid #06b6d4}}
+.card-top {{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}}
 .card h3 {{color:#1e3a8a;margin:0 0 5px 0}}
 .card p {{color:#64748b;font-size:0.9em;margin:3px 0}}
+.status-line {{color:#94a3b8 !important}}
 .mini-stats {{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}}
 .mini-stats span {{background:white;padding:8px 10px;border-radius:8px;color:#1e3a8a;font-weight:600;font-size:0.85em}}
+.card-actions {{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}}
+.card-actions a,.btn-link {{color:#0891b2;font-weight:700;text-decoration:none}}
 .empty {{color:#94a3b8;text-align:center;padding:20px}}
 .empty a {{color:#06b6d4}}
 </style>
@@ -1358,6 +1673,7 @@ async def google_callback(code: str, state: Optional[str] = None, error: Optiona
         import urllib.parse
         callback_params = urllib.parse.urlencode({
             "connected": "1",
+            "business_id": business_id,
             "name": business_name,
             "phone": sms_recipient or "",
             "location": location_display,
@@ -1491,6 +1807,23 @@ async def sync_google_reviews(business_id: str):
     except Exception as e:
         logger.error(f"Failed to sync Google reviews: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/businesses/{business_id}/sync-reviews")
+async def sync_google_reviews_browser(business_id: str):
+    """Browser-friendly sync action that redirects back to the business dashboard."""
+    try:
+        result = await sync_google_reviews(business_id)
+        return RedirectResponse(
+            url=f"/businesses/{business_id}/dashboard?synced={result.get('new_reviews', 0)}",
+            status_code=303,
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else "Sync failed. Please try again."
+        return RedirectResponse(
+            url=f"/businesses/{business_id}/dashboard?error={detail}",
+            status_code=303,
+        )
 
 
 # ==================== DEBUG ENDPOINTS ====================
@@ -1908,7 +2241,7 @@ async def submit_review_page():
 
 @app.get("/onboard", response_class=HTMLResponse)
 async def onboard_page():
-    """3-Step onboarding wizard: Business details → Google Connect → Done"""
+    """Friendly onboarding wizard for new businesses."""
     html = """
     <!DOCTYPE html>
     <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1923,6 +2256,9 @@ async def onboard_page():
     .nav a:hover{background:#e0f2fe}
     .nav a.active{background:#06b6d4;color:white}
     .card{background:white;border-radius:16px;padding:40px;box-shadow:0 8px 30px rgba(0,0,0,0.12);text-align:center}
+    .hero-note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;text-align:left;margin-bottom:24px}
+    .hero-note h3{color:#1e3a8a;margin-bottom:6px;font-size:16px}
+    .hero-note p{color:#475569;font-size:14px;line-height:1.6}
     /* Progress bar */
     .steps{display:flex;justify-content:center;gap:0;margin-bottom:30px}
     .step{display:flex;align-items:center;gap:0}
@@ -1938,8 +2274,9 @@ async def onboard_page():
     .subtitle{color:#64748b;font-size:16px;line-height:1.6;margin-bottom:24px}
     .form-group{margin-bottom:20px;text-align:left}
     label{display:block;color:#1e3a8a;font-size:14px;margin-bottom:8px;font-weight:600}
-    input{width:100%;padding:14px 16px;font-size:16px;border:2px solid #e2e8f0;border-radius:10px;background:#f8fafc;color:#1e3a8a}
-    input:focus{outline:0;border-color:#06b6d4;background:white}
+    input,textarea,select{width:100%;padding:14px 16px;font-size:16px;border:2px solid #e2e8f0;border-radius:10px;background:#f8fafc;color:#1e3a8a}
+    textarea{min-height:88px;resize:vertical}
+    input:focus,textarea:focus,select:focus{outline:0;border-color:#06b6d4;background:white}
     input::placeholder{color:#94a3b8}
     .btn{width:100%;color:white;border:0;padding:16px;font-size:18px;font-weight:600;border-radius:10px;cursor:pointer;transition:all 0.2s}
     .btn:hover{transform:translateY(-1px)}
@@ -1967,6 +2304,10 @@ async def onboard_page():
     <div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/businesses">Businesses</a><a href="/onboard" class="active">Setup</a></div>
 
     <div class="card">
+    <div class="hero-note">
+      <h3>What happens after signup</h3>
+      <p>We create a private workspace just for this business, connect Google if you choose, then send SMS approvals whenever a new review needs a reply. Nothing from one business is mixed into another.</p>
+    </div>
     <!-- Progress -->
     <div class="steps">
       <div class="step"><div class="step-circle active" id="sc1">1</div></div>
@@ -1978,8 +2319,8 @@ async def onboard_page():
 
     <!-- STEP 1: Business Details -->
     <div class="step-content active" id="step1">
-      <h2>📝 Your Business Details</h2>
-      <p class="subtitle">We just need the basics to get started.</p>
+      <h2>📝 Tell us about the business</h2>
+      <p class="subtitle">This creates a dedicated TradeReply workspace for one business. You can add more later without anything overlapping.</p>
       <div id="error1" class="error-msg"></div>
       <form id="form1">
         <div class="form-group">
@@ -1990,6 +2331,19 @@ async def onboard_page():
           <label for="phone">Mobile Number</label>
           <input type="tel" id="phone" placeholder="+61 400 123 456" required>
           <small style="color:#94a3b8;font-size:12px;margin-top:4px;display:block">We'll send SMS approvals to this number</small>
+        </div>
+        <div class="form-group">
+          <label for="description">What kind of business is this? <span style="font-weight:400;color:#94a3b8">(optional)</span></label>
+          <textarea id="description" placeholder="e.g. Family-run plumbing business focused on fast, friendly service across Sydney"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="responseTone">Reply tone <span style="font-weight:400;color:#94a3b8">(optional)</span></label>
+          <select id="responseTone">
+            <option value="">Professional default</option>
+            <option value="friendly">Friendly and warm</option>
+            <option value="premium">Premium and polished</option>
+            <option value="practical">Straightforward and practical</option>
+          </select>
         </div>
         <button type="submit" class="btn btn-primary" id="btn1">Continue →</button>
       </form>
@@ -2003,7 +2357,7 @@ async def onboard_page():
     <!-- STEP 2: Google Connect -->
     <div class="step-content" id="step2">
       <h2>🔗 Connect Google Business</h2>
-      <p class="subtitle">Link your Google Business Profile so TradeReply can fetch reviews and post responses automatically.</p>
+      <p class="subtitle">Link your Google Business Profile so TradeReply can fetch new reviews and post approved responses automatically for this business.</p>
       <div class="info-box">
         <p>🔒 <strong>Secure:</strong> We only access reviews and replies. We never see or change anything else on your account.</p>
       </div>
@@ -2025,7 +2379,7 @@ async def onboard_page():
         <p><strong>Google:</strong> <span id="doneGoogle">Not connected</span></p>
       </div>
       <p class="subtitle" style="margin-top:16px">When a new review comes in, you'll get an SMS with the AI-written response. Just reply YES to approve or NO to reject.</p>
-      <a href="/ops/dashboard" class="btn btn-primary" style="display:block;text-decoration:none;margin-top:16px">Go to Dashboard →</a>
+      <a href="/ops/dashboard" class="btn btn-primary" id="doneDashboardLink" style="display:block;text-decoration:none;margin-top:16px">Go to Dashboard →</a>
     </div>
     </div></div>
 
@@ -2059,10 +2413,12 @@ async def onboard_page():
       try {
         businessName = document.getElementById('name').value.trim();
         businessPhone = document.getElementById('phone').value.trim();
+        const description = document.getElementById('description').value.trim();
+        const responseTone = document.getElementById('responseTone').value;
         const res = await fetch('/businesses', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({name: businessName, phone: businessPhone})
+          body: JSON.stringify({name: businessName, phone: businessPhone, description, response_tone: responseTone})
         });
         if (!res.ok) {
           let errMsg = 'Failed to create business';
@@ -2096,18 +2452,25 @@ async def onboard_page():
       document.getElementById('doneName').textContent = businessName;
       document.getElementById('donePhone').textContent = businessPhone;
       document.getElementById('doneGoogle').textContent = 'Not connected (connect anytime from Settings)';
+      if (businessId) {
+        document.getElementById('doneDashboardLink').href = '/businesses/' + businessId + '/dashboard';
+      }
       goStep(3);
     }
 
     // Check if we're returning from Google OAuth
     const params = new URLSearchParams(window.location.search);
     if (params.get('connected') === '1') {
+      businessId = params.get('business_id') || businessId;
       const name = params.get('name') || 'Your Business';
       const phone = params.get('phone') || '';
       const location = params.get('location') || '';
       document.getElementById('doneName').textContent = name;
       document.getElementById('donePhone').textContent = phone;
       document.getElementById('doneGoogle').textContent = location ? '✅ ' + location : '✅ Connected';
+      if (businessId) {
+        document.getElementById('doneDashboardLink').href = '/businesses/' + businessId + '/dashboard';
+      }
       goStep(3);
     }
     </script>
