@@ -2289,10 +2289,10 @@ async def submit_review_page():
     <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeReply - Submit Review</title><style>
     *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1e3a8a,#3b82f6);min-height:100vh;padding:20px}
-    .container{max-width:800px;margin:0 auto}.header{text-align:center;color:white;margin-bottom:30px}.header h1{font-size:2.5em}.header p{opacity:0.9;font-size:18px}
-    .nav{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,0.08)}
+    .container{max-width:760px;margin:0 auto}.header{text-align:center;color:white;margin-bottom:30px}.header h1{font-size:2.5em;margin-bottom:4px}.header p{opacity:0.9;font-size:18px}
+    .nav{background:white;border-radius:12px;padding:15px 20px;margin-bottom:20px;display:flex;gap:20px;justify-content:center;flex-wrap:wrap;box-shadow:0 8px 24px rgba(0,0,0,0.08)}
     .nav a{color:#1e3a8a;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600}.nav a:hover{background:#e0f2fe}
-    .nav a.active{background:#06b6d4;color:white}.card{background:white;border-radius:12px;padding:30px;box-shadow:0 4px 6px rgba(0,0,0,0.1)}
+    .nav a.active{background:#06b6d4;color:white}.card{background:white;border-radius:16px;padding:40px;box-shadow:0 8px 30px rgba(0,0,0,0.12)}
     .hero-note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;text-align:left;margin-bottom:24px}
     .hero-note h3{color:#1e3a8a;margin-bottom:6px;font-size:16px}.hero-note p{color:#475569;font-size:14px;line-height:1.6}
     h2{color:#1e3a8a;margin-bottom:20px;font-size:1.5em}.form-group{margin-bottom:20px}
@@ -2304,9 +2304,10 @@ async def submit_review_page():
     .success{background:#d1fae5;border:2px solid #10b981;border-radius:8px;padding:20px;margin-bottom:20px;display:none}
     .success h3{color:#065f46;margin:0 0 8px 0}.success p{color:#047857;margin:0}
     .stars{display:flex;gap:8px;margin-bottom:8px}.star{font-size:32px;cursor:pointer;color:#cbd5e1}.star.active{color:#fbbf24}
+    @media (max-width:720px){.container{max-width:100%}.card{padding:26px 20px}}
     </style></head><body><div class="container">
     <div class="header"><h1>🦞 TradeReply</h1><p>Manually test the review-to-SMS workflow</p></div>
-    <div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review" class="active">Submit Review</a><a href="/businesses">Businesses</a><a href="/onboard">Add Business</a></div>
+    <div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review" class="active">Submit Review</a><a href="/businesses">Businesses</a><a href="/onboard">Setup</a></div>
     <div class="card">
     <div class="hero-note"><h3>How to use this page</h3><p>Pick a business, paste in a review, and TradeReply will create the AI draft and send the same SMS approval flow your customer would see from a real Google review.</p></div>
     <h2>📝 Submit a Review</h2>
