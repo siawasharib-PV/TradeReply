@@ -557,12 +557,16 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
       <style>
         * {{ margin:0; padding:0; box-sizing:border-box; }}
         body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%); min-height:100vh; padding:20px; color:#0f172a; }}
-        .container {{ max-width:1200px; margin:0 auto; }}
-        .nav {{ background:white; border-radius:14px; padding:14px 18px; margin-bottom:20px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
+        .container {{ max-width:760px; margin:0 auto; }}
+        .header {{ text-align:center; color:white; margin-bottom:30px; }}
+        .header h1 {{ font-size:2.5em; margin-bottom:4px; }}
+        .header p {{ opacity:0.9; font-size:18px; }}
+        .nav {{ background:white; border-radius:12px; padding:15px 20px; margin-bottom:20px; display:flex; gap:20px; justify-content:center; flex-wrap:wrap; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
         .nav a {{ color:#1e3a8a; text-decoration:none; padding:10px 16px; border-radius:10px; font-weight:600; }}
         .nav a:hover {{ background:#e0f2fe; }}
         .nav a.active {{ background:#06b6d4; color:white; }}
-        .hero {{ background:white; border-radius:22px; padding:28px; box-shadow:0 12px 32px rgba(0,0,0,0.12); margin-bottom:20px; }}
+        .card-shell {{ background:white; border-radius:16px; padding:40px; box-shadow:0 8px 30px rgba(0,0,0,0.12); }}
+        .hero {{ background:white; border-radius:0; padding:0; box-shadow:none; margin-bottom:20px; }}
         .banner {{ border-radius:14px; padding:16px 18px; margin-bottom:18px; font-weight:600; box-shadow:0 10px 28px rgba(0,0,0,0.08); }}
         .banner.success {{ background:#ecfdf5; color:#166534; border:1px solid #86efac; }}
         .banner.error {{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }}
@@ -578,12 +582,12 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
         .meta-card {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:16px; }}
         .meta-card span {{ display:block; color:#64748b; font-size:13px; margin-bottom:8px; }}
         .meta-card strong {{ color:#1e3a8a; font-size:1rem; }}
-        .stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:20px; }}
-        .stat-card {{ background:white; border-radius:18px; padding:22px; box-shadow:0 10px 28px rgba(0,0,0,0.10); }}
+        .stats {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-bottom:20px; }}
+        .stat-card {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:22px; }}
         .stat-card .value {{ color:#1e3a8a; font-size:2rem; font-weight:800; }}
         .stat-card .label {{ color:#64748b; margin-top:6px; font-size:14px; }}
-        .grid {{ display:grid; grid-template-columns:2fr 1fr; gap:20px; }}
-        .section {{ background:white; border-radius:18px; padding:22px; box-shadow:0 10px 28px rgba(0,0,0,0.10); margin-bottom:20px; }}
+        .grid {{ display:grid; grid-template-columns:1fr; gap:20px; }}
+        .section {{ background:white; border-radius:16px; padding:0; box-shadow:none; margin-bottom:20px; }}
         .section h2 {{ color:#1e3a8a; margin-bottom:8px; }}
         .section p.section-copy {{ color:#64748b; margin-bottom:18px; line-height:1.5; }}
         .review-row, .list-row, .activity-row {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:16px; margin-bottom:12px; }}
@@ -599,20 +603,30 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
         .check-icon.done {{ background:#dcfce7; color:#166534; }}
         .check-icon.todo {{ background:#e2e8f0; color:#64748b; }}
         .text-link {{ color:#0891b2; font-weight:700; text-decoration:none; }}
-        @media (max-width: 900px) {{
-          .grid {{ grid-template-columns:1fr; }}
+        @media (max-width: 720px) {{
+          .container {{ max-width:100%; }}
+          .card-shell {{ padding:26px 20px; }}
+          .stats {{ grid-template-columns:1fr; }}
+          .hero-actions {{ flex-direction:column; }}
+          .hero-actions .btn {{ width:100%; }}
+          .hero-top, .review-top, .list-row, .activity-row {{ flex-direction:column; }}
         }}
       </style>
     </head>
     <body>
       <div class="container">
+        <div class="header">
+          <h1>🦞 TradeReply</h1>
+          <p>{business.name} workspace</p>
+        </div>
         <div class="nav">
-          <a href="/ops/dashboard">All Businesses</a>
+          <a href="/ops/dashboard">Dashboard</a>
           <a href="/businesses" class="active">Businesses</a>
           <a href="/submit-review">Submit Review</a>
-          <a href="/onboard">Add Business</a>
+          <a href="/onboard">Setup</a>
         </div>
 
+        <div class="card-shell">
         {flash_html}
         {error_html}
 
@@ -679,6 +693,7 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
               {activity_html}
             </div>
           </div>
+        </div>
         </div>
       </div>
     </body>
@@ -988,14 +1003,23 @@ async def list_businesses_html():
 <style>
 * {{margin:0;padding:0;box-sizing:border-box}}
 body {{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1e3a8a,#3b82f6);min-height:100vh;padding:20px}}
-.container {{max-width:800px;margin:0 auto}}
+.container {{max-width:760px;margin:0 auto}}
 .header {{text-align:center;color:white;margin-bottom:30px}}
-.header h1 {{font-size:2.5em}}
-.nav {{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center}}
+.header h1 {{font-size:2.5em;margin-bottom:4px}}
+.header p {{opacity:0.9;font-size:18px}}
+.nav {{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,0.08)}}
 .nav a {{color:#1e3a8a;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600}}
 .nav a:hover {{background:#e0f2fe}}
 .nav a.active {{background:#06b6d4;color:white}}
-.section {{background:white;border-radius:12px;padding:25px;box-shadow:0 4px 6px rgba(0,0,0,0.1)}}
+.card-shell {{background:white;border-radius:16px;padding:40px;box-shadow:0 8px 30px rgba(0,0,0,0.12)}}
+.hero-note {{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;margin-bottom:24px}}
+.hero-note h2 {{color:#1e3a8a;margin-bottom:8px;font-size:1.15rem}}
+.hero-note p {{color:#475569;line-height:1.6}}
+.hero-actions {{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}}
+.hero-actions a {{text-decoration:none;border-radius:10px;padding:12px 16px;font-weight:700}}
+.hero-actions .primary {{background:#06b6d4;color:white}}
+.hero-actions .secondary {{background:#eff6ff;color:#1e3a8a}}
+.section {{background:white;border-radius:16px;padding:0;box-shadow:none}}
 .section h2 {{color:#1e3a8a;margin-bottom:15px}}
 .card {{background:#f8fafc;padding:15px;border-radius:8px;margin-bottom:10px;border-left:4px solid #06b6d4}}
 .card-top {{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}}
@@ -1006,13 +1030,31 @@ body {{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1
 .mini-stats span {{background:white;padding:8px 10px;border-radius:8px;color:#1e3a8a;font-weight:600;font-size:0.85em}}
 .card-actions {{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}}
 .card-actions a,.btn-link {{color:#0891b2;font-weight:700;text-decoration:none}}
-.empty {{color:#94a3b8;text-align:center;padding:20px}}
+.section-copy {{color:#64748b;line-height:1.6;margin-bottom:18px}}
+.empty {{color:#94a3b8;text-align:center;padding:20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px}}
 .empty a {{color:#06b6d4}}
+@media (max-width:720px) {{
+  .container {{max-width:100%}}
+  .card-shell {{padding:26px 20px}}
+  .hero-actions {{flex-direction:column}}
+  .hero-actions a {{text-align:center}}
+  .card-top {{flex-direction:column}}
+}}
 </style>
 </head><body><div class="container">
 <div class="header"><h1>🦞 TradeReply</h1><p>Your connected businesses</p></div>
-<div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review">Submit Review</a><a href="/businesses" class="active">Businesses</a><a href="/onboard">Add Business</a></div>
-<div class="section"><h2>📍 Businesses ({count})</h2>{cards}</div>
+<div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review">Submit Review</a><a href="/businesses" class="active">Businesses</a><a href="/onboard">Setup</a></div>
+<div class="card-shell">
+  <div class="hero-note">
+    <h2>Business workspaces</h2>
+    <p>Each business gets its own private TradeReply workspace. Nothing overlaps, and you can jump into a specific business to see its reviews, drafts, approvals, and posted replies.</p>
+    <div class="hero-actions">
+      <a class="primary" href="/onboard">Add a business</a>
+      <a class="secondary" href="/ops/dashboard">Open dashboard</a>
+    </div>
+  </div>
+  <div class="section"><h2>📍 Businesses ({count})</h2><p class="section-copy">Use these cards to see who has signed up and open the correct business workspace.</p>{cards}</div>
+</div>
 </div></body></html>"""
     return HTMLResponse(content=html)
 
