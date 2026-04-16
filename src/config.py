@@ -14,8 +14,23 @@ class ConfigError(RuntimeError):
 class Config:
     """Application configuration"""
 
+    @staticmethod
+    def _default_database_path() -> str:
+        explicit = os.getenv("TRADEREPLY_DB_PATH")
+        if explicit:
+            return explicit
+
+        railway_mount = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+        if railway_mount:
+            return str(Path(railway_mount) / "tradereply.db")
+
+        if os.getenv("RAILWAY_ENVIRONMENT_ID") and Path("/data").exists():
+            return "/data/tradereply.db"
+
+        return "tradereply.db"
+
     # Database
-    DATABASE_PATH = os.getenv("TRADEREPLY_DB_PATH", "tradereply.db")
+    DATABASE_PATH = _default_database_path.__func__()
 
     # Twilio
     TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")

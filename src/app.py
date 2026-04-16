@@ -1837,7 +1837,7 @@ async def get_audit_events(limit: int = 100, business_id: Optional[str] = None):
 
 @app.get("/ops/dashboard", response_class=HTMLResponse)
 async def ops_dashboard():
-    """Minimal operator dashboard for pilot operations."""
+    """Operator overview across all businesses."""
     businesses = db.list_businesses()
     business_cards = []
     pending = []
@@ -1850,13 +1850,17 @@ async def ops_dashboard():
         metrics = summary["metrics"]
         business_cards.append(
             {
+                "id": business.id,
                 "name": business.name,
                 "google_connected": summary["google_connected"],
+                "google_location_id": summary["google_location_id"],
                 "reviews_received": metrics["reviews_received"],
                 "drafts_generated": metrics["drafts_generated"],
                 "awaiting_approval": metrics["awaiting_approval"],
+                "approved": metrics["approved"],
                 "posted": metrics["posted"],
                 "post_failed": metrics["post_failed"],
+                "last_review_at": metrics["last_review_at"],
             }
         )
         pending.extend([
@@ -1878,36 +1882,44 @@ async def ops_dashboard():
 
     def render_list(items, kind):
         if not items:
-            return '<div class="muted">None</div>'
+            return '<div class="empty">Nothing to show yet.</div>'
         rows=[]
         for x in items:
             if kind=='pending':
-                rows.append(f"<li><strong>{x['business']}</strong> • approval {x['approval_id']} • {x['sms_sent_at']}</li>")
+                rows.append(f"<div class='list-row'><div><strong>{x['business']}</strong><p>Approval {x['approval_id'][:8]} is waiting for an SMS response.</p></div><span>{_format_timestamp(x['sms_sent_at'])}</span></div>")
             elif kind=='ready':
-                rows.append(f"<li><strong>{x['business']}</strong> • draft {x['draft_id']}<br><span class='muted'>{x['text']}</span></li>")
+                rows.append(f"<div class='list-row'><div><strong>{x['business']}</strong><p>{_truncate_text(x['text'], 120)}</p></div><span>Draft ready</span></div>")
             elif kind=='posted':
-                rows.append(f"<li><strong>{x['business']}</strong> • {x['posted_at']}</li>")
+                rows.append(f"<div class='list-row'><div><strong>{x['business']}</strong><p>{_truncate_text(x['text'], 120)}</p></div><span>{_format_timestamp(x['posted_at'])}</span></div>")
             elif kind=='failed':
-                rows.append(f"<li><strong>{x['business']}</strong> • draft {x['draft_id']}<br><span class='muted'>{x['text']}</span></li>")
-        return '<ul>' + ''.join(rows) + '</ul>'
+                rows.append(f"<div class='list-row'><div><strong>{x['business']}</strong><p>{_truncate_text(x['text'], 120)}</p></div><span>Needs follow-up</span></div>")
+        return ''.join(rows)
 
     business_summary_html = ''.join(
         [
             f"""
             <div class="biz-card">
-              <h3>{card['name']}</h3>
-              <p class="muted">{'Google connected' if card['google_connected'] else 'Google not connected'}</p>
+              <div class="biz-card-top">
+                <div>
+                  <h3>{card['name']}</h3>
+                  <p class="muted">{'Google connected' if card['google_connected'] else 'Google not connected'} • Last review {_format_timestamp(card['last_review_at'])}</p>
+                </div>
+                <a href="/businesses/{card['id']}/dashboard" class="text-link">Open workspace</a>
+              </div>
               <div class="biz-metrics">
                 <span>Reviews {card['reviews_received']}</span>
                 <span>Drafts {card['drafts_generated']}</span>
                 <span>Pending {card['awaiting_approval']}</span>
                 <span>Posted {card['posted']}</span>
               </div>
+              <div class="biz-footer">
+                <span>{card['google_location_id'] or 'Google location not mapped yet'}</span>
+              </div>
             </div>
             """
             for card in business_cards
         ]
-    ) or '<div class="empty">No connected businesses yet</div>'
+    ) or '<div class="empty">No businesses yet. Add your first business from Setup.</div>'
 
     html = f"""
     <!DOCTYPE html>
@@ -1922,36 +1934,43 @@ async def ops_dashboard():
         .container {{ max-width: 1200px; margin: 0 auto; }}
         .header {{ text-align: center; color: white; margin-bottom: 30px; }}
         .header h1 {{ font-size: 2.5em; margin-bottom: 10px; }}
-        .header p {{ opacity: 0.9; }}
-        .nav {{ background: white; border-radius: 12px; padding: 15px 20px; margin-bottom: 20px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }}
+        .header p {{ opacity: 0.9; font-size: 18px; }}
+        .nav {{ background: white; border-radius: 12px; padding: 15px 20px; margin-bottom: 20px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
         .nav a {{ color: #1e3a8a; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; }}
         .nav a:hover {{ background: #e0f2fe; }}
         .nav a.active {{ background: #06b6d4; color: white; }}
-        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
-        .stat-card {{ background: white; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .hero-note {{ background:white; border-radius:16px; padding:22px; margin-bottom:22px; box-shadow:0 10px 28px rgba(0,0,0,0.10); }}
+        .hero-note h2 {{ color:#1e3a8a; margin-bottom:8px; }}
+        .hero-note p {{ color:#475569; line-height:1.6; }}
+        .hero-actions {{ display:flex; gap:12px; flex-wrap:wrap; margin-top:16px; }}
+        .hero-actions a {{ text-decoration:none; border-radius:10px; padding:12px 16px; font-weight:700; }}
+        .hero-actions .primary {{ background:#06b6d4; color:white; }}
+        .hero-actions .secondary {{ background:#eff6ff; color:#1e3a8a; }}
+        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 24px; }}
+        .stat-card {{ background: white; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.10); }}
         .stat-card .number {{ font-size: 3em; font-weight: bold; color: #1e3a8a; }}
         .stat-card .label {{ color: #64748b; margin-top: 5px; }}
-        .section {{ background: white; border-radius: 12px; padding: 25px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .section {{ background: white; border-radius: 16px; padding: 25px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.10); }}
         .section h2 {{ color: #1e3a8a; margin-bottom: 15px; font-size: 1.5em; }}
-        .item {{ background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #06b6d4; }}
-        .item strong {{ color: #1e3a8a; }}
-        .item .muted {{ color: #64748b; font-size: 0.9em; }}
         .empty {{ color: #94a3b8; text-align: center; padding: 20px; }}
-        .workflow {{ background: #f0f9ff; border-radius: 12px; padding: 20px; margin-bottom: 30px; }}
+        .workflow {{ background: #f0f9ff; border-radius: 16px; padding: 20px; margin-bottom: 24px; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
         .workflow h2 {{ color: #1e3a8a; margin-bottom: 15px; }}
         .workflow-steps {{ display: flex; gap: 15px; flex-wrap: wrap; }}
-        .workflow-step {{ background: white; padding: 15px 20px; border-radius: 8px; flex: 1; min-width: 150px; }}
+        .workflow-step {{ background: white; padding: 15px 20px; border-radius: 12px; flex: 1; min-width: 150px; }}
         .workflow-step .step-num {{ background: #06b6d4; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; margin-bottom: 8px; }}
         .workflow-step .step-text {{ color: #1e3a8a; font-weight: 600; }}
         .biz-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }}
-        .biz-card {{ background:#f8fafc; border-radius:10px; padding:16px; border-left:4px solid #06b6d4; }}
+        .biz-card {{ background:#f8fafc; border-radius:14px; padding:16px; border-left:4px solid #06b6d4; }}
+        .biz-card-top {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; }}
         .biz-card h3 {{ color:#1e3a8a; margin-bottom:6px; }}
         .biz-metrics {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }}
         .biz-metrics span {{ background:white; padding:8px 10px; border-radius:8px; color:#1e3a8a; font-weight:600; font-size:0.9em; }}
-        .alert {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
-        .alert strong {{ color: #92400e; }}
-        ul {{ padding-left: 20px; }}
-        li {{ margin-bottom: 8px; list-style: none; }}
+        .biz-footer {{ margin-top:12px; color:#64748b; font-size:0.9em; }}
+        .list-row {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }}
+        .list-row strong {{ color:#1e3a8a; }}
+        .list-row p {{ color:#64748b; margin-top:6px; line-height:1.5; }}
+        .list-row span {{ color:#94a3b8; white-space:nowrap; font-size:0.9em; }}
+        .text-link {{ color:#0891b2; text-decoration:none; font-weight:700; }}
         .muted {{ color: #64748b; }}
       </style>
     </head>
@@ -1959,7 +1978,7 @@ async def ops_dashboard():
       <div class="container">
         <div class="header">
           <h1>🦞 TradeReply Dashboard</h1>
-          <p>Manage review responses for your business</p>
+          <p>See every signed-up business, what TradeReply has generated, and where each reply is sitting.</p>
         </div>
         
         <div class="nav">
@@ -1968,9 +1987,14 @@ async def ops_dashboard():
           <a href="/businesses">Businesses</a>
           <a href="/onboard">Add Business</a>
         </div>
-        
-        <div class="alert">
-          <strong>📋 Automated Workflow:</strong> TradeReply checks connected Google Business Profiles → drafts a reply → sends an SMS approval → posts to Google automatically after YES
+
+        <div class="hero-note">
+          <h2>Everything in one place</h2>
+          <p>This is your operator view across all businesses. Use it to see which businesses have signed up, which ones are connected to Google, how many drafts TradeReply has generated, and where approvals or posted replies stand.</p>
+          <div class="hero-actions">
+            <a class="primary" href="/onboard">Add a business</a>
+            <a class="secondary" href="/businesses">Open businesses</a>
+          </div>
         </div>
         
         <div class="stats">
@@ -1993,7 +2017,7 @@ async def ops_dashboard():
         </div>
         
         <div class="workflow">
-          <h2>How It Works</h2>
+          <h2>How the automated flow works</h2>
           <div class="workflow-steps">
             <div class="workflow-step">
               <div class="step-num">1</div>
@@ -2019,26 +2043,26 @@ async def ops_dashboard():
         </div>
 
         <div class="section">
-          <h2>🏢 Business Overview</h2>
+          <h2>🏢 Business overview</h2>
           <div class="biz-grid">{business_summary_html}</div>
         </div>
         
         <div class="section">
-          <h2>⏳ Pending Approvals ({len(pending)})</h2>
+          <h2>⏳ Pending approvals ({len(pending)})</h2>
           {render_list(pending, 'pending') if pending else '<div class="empty">No pending approvals</div>'}
         </div>
         
         <div class="section">
-          <h2>✅ Ready to Post ({len(ready)})</h2>
+          <h2>✅ Approved drafts still waiting to post ({len(ready)})</h2>
           {render_list(ready, 'ready') if ready else '<div class="empty">No responses ready to post</div>'}
         </div>
         
         <div class="section">
-          <h2>📤 Posted Responses ({len(posted)})</h2>
+          <h2>📤 Posted responses ({len(posted)})</h2>
           {render_list(posted, 'posted') if posted else '<div class="empty">No responses posted yet</div>'}
         </div>
         
-        {f'<div class="section"><h2>❌ Failed Posts ({len(failed)})</h2>{render_list(failed, "failed")}</div>' if failed else ''}
+        {f'<div class="section"><h2>❌ Failed posts ({len(failed)})</h2>{render_list(failed, "failed")}</div>' if failed else ''}
       </div>
     </body>
     </html>
@@ -2207,10 +2231,12 @@ async def submit_review_page():
     <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeReply - Submit Review</title><style>
     *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1e3a8a,#3b82f6);min-height:100vh;padding:20px}
-    .container{max-width:800px;margin:0 auto}.header{text-align:center;color:white;margin-bottom:30px}.header h1{font-size:2.5em}
-    .nav{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center}
+    .container{max-width:800px;margin:0 auto}.header{text-align:center;color:white;margin-bottom:30px}.header h1{font-size:2.5em}.header p{opacity:0.9;font-size:18px}
+    .nav{background:white;border-radius:12px;padding:15px;margin-bottom:20px;display:flex;gap:20px;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,0.08)}
     .nav a{color:#1e3a8a;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600}.nav a:hover{background:#e0f2fe}
     .nav a.active{background:#06b6d4;color:white}.card{background:white;border-radius:12px;padding:30px;box-shadow:0 4px 6px rgba(0,0,0,0.1)}
+    .hero-note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;text-align:left;margin-bottom:24px}
+    .hero-note h3{color:#1e3a8a;margin-bottom:6px;font-size:16px}.hero-note p{color:#475569;font-size:14px;line-height:1.6}
     h2{color:#1e3a8a;margin-bottom:20px;font-size:1.5em}.form-group{margin-bottom:20px}
     label{display:block;color:#1e3a8a;font-size:14px;margin-bottom:8px;font-weight:600}
     input,textarea,select{width:100%;padding:14px 16px;font-size:16px;border:2px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#1e3a8a}
@@ -2221,9 +2247,11 @@ async def submit_review_page():
     .success h3{color:#065f46;margin:0 0 8px 0}.success p{color:#047857;margin:0}
     .stars{display:flex;gap:8px;margin-bottom:8px}.star{font-size:32px;cursor:pointer;color:#cbd5e1}.star.active{color:#fbbf24}
     </style></head><body><div class="container">
-    <div class="header"><h1>🦞 TradeReply</h1><p>Submit a review for AI-powered response</p></div>
+    <div class="header"><h1>🦞 TradeReply</h1><p>Manually test the review-to-SMS workflow</p></div>
     <div class="nav"><a href="/ops/dashboard">Dashboard</a><a href="/submit-review" class="active">Submit Review</a><a href="/businesses">Businesses</a><a href="/onboard">Add Business</a></div>
-    <div class="card"><h2>📝 Submit a Review</h2>
+    <div class="card">
+    <div class="hero-note"><h3>How to use this page</h3><p>Pick a business, paste in a review, and TradeReply will create the AI draft and send the same SMS approval flow your customer would see from a real Google review.</p></div>
+    <h2>📝 Submit a Review</h2>
     <div id="successBox" class="success"><h3>✅ Review Submitted!</h3><p>Check your phone for the approval SMS.</p></div>
     <form id="reviewForm">
     <div class="form-group"><label for="businessId">Business</label><select id="businessId" required><option value="">Loading...</option></select></div>
