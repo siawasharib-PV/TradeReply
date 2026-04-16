@@ -239,8 +239,11 @@ class DatabaseHelper:
         try:
             self.cursor.execute(
                 """
-                INSERT INTO reviews (id, business_id, reviewer_name, rating, review_text, reviewer_email, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO reviews (
+                    id, business_id, reviewer_name, rating, review_text, reviewer_email,
+                    google_review_id, google_review_name, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     review.id,
@@ -249,6 +252,8 @@ class DatabaseHelper:
                     review.rating.value,
                     review.review_text,
                     review.reviewer_email,
+                    review.google_review_id,
+                    review.google_review_name,
                     review.created_at.isoformat(),
                 ),
             )
@@ -269,6 +274,8 @@ class DatabaseHelper:
                 rating=StarRating(row["rating"]),
                 review_text=row["review_text"],
                 reviewer_email=row["reviewer_email"],
+                google_review_id=row["google_review_id"] if "google_review_id" in row.keys() else None,
+                google_review_name=row["google_review_name"] if "google_review_name" in row.keys() else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
         return None
@@ -379,6 +386,18 @@ class DatabaseHelper:
             self.cursor.execute(
                 "UPDATE draft_responses SET status = ? WHERE id = ?",
                 (status, draft_id),
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+
+    def update_draft_text(self, draft_id: str, draft_text: str) -> bool:
+        """Update the draft response text."""
+        try:
+            self.cursor.execute(
+                "UPDATE draft_responses SET draft_text = ? WHERE id = ?",
+                (draft_text, draft_id),
             )
             self.conn.commit()
             return True
@@ -691,6 +710,60 @@ class DatabaseHelper:
             }
             for row in rows
         ]
+
+    def get_business_metrics(self, business_id: str) -> dict:
+        """Return summary metrics for a business."""
+        metrics = {
+            "reviews_received": 0,
+            "drafts_generated": 0,
+            "awaiting_approval": 0,
+            "approved": 0,
+            "rejected": 0,
+            "posted": 0,
+            "post_failed": 0,
+            "approval_rate": 0.0,
+            "last_review_at": None,
+            "last_posted_at": None,
+        }
+
+        self.cursor.execute(
+            "SELECT COUNT(*) AS count, MAX(created_at) AS last_review_at FROM reviews WHERE business_id = ?",
+            (business_id,),
+        )
+        review_row = self.cursor.fetchone()
+        metrics["reviews_received"] = review_row["count"] if review_row else 0
+        metrics["last_review_at"] = review_row["last_review_at"] if review_row else None
+
+        self.cursor.execute(
+            "SELECT COUNT(*) AS count FROM draft_responses WHERE business_id = ?",
+            (business_id,),
+        )
+        row = self.cursor.fetchone()
+        metrics["drafts_generated"] = row["count"] if row else 0
+
+        for status_key in ("awaiting_approval", "approved", "rejected", "posted", "post_failed"):
+            self.cursor.execute(
+                "SELECT COUNT(*) AS count FROM draft_responses WHERE business_id = ? AND status = ?",
+                (business_id, status_key),
+            )
+            row = self.cursor.fetchone()
+            metrics[status_key] = row["count"] if row else 0
+
+        self.cursor.execute(
+            "SELECT COUNT(*) AS count, MAX(posted_at) AS last_posted_at FROM responses WHERE business_id = ?",
+            (business_id,),
+        )
+        response_row = self.cursor.fetchone()
+        metrics["last_posted_at"] = response_row["last_posted_at"] if response_row else None
+
+        decisions = metrics["approved"] + metrics["rejected"] + metrics["posted"] + metrics["post_failed"]
+        if decisions:
+            metrics["approval_rate"] = round(
+                (metrics["approved"] + metrics["posted"]) / decisions,
+                4,
+            )
+
+        return metrics
 
     # ==================== UTILITY ====================
 

@@ -81,6 +81,7 @@ def build_sms_approval_message(
     review_text: str,
     draft_response: str,
     approval_id: str = None,
+    edit_url: str = None,
 ) -> str:
     """
     Build the SMS message with full review and response.
@@ -102,6 +103,11 @@ AI DRAFT REPLY:
 ---
 ✅ Reply YES to approve
 ❌ Reply NO to skip"""
+
+    if edit_url:
+        message += f"""
+✏️ Edit before posting:
+{edit_url}"""
     
     return message
 

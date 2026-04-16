@@ -37,6 +37,26 @@ class GoogleBusinessClient:
         self.credentials = None
         self.service = None
 
+    def _ensure_credentials(self):
+        """Ensure OAuth credentials exist when a refresh token is available."""
+        if self.credentials:
+            return self.credentials
+
+        if not self.refresh_token:
+            raise ValueError("No refresh token available. Run OAuth flow first.")
+
+        from google.oauth2.credentials import Credentials
+
+        self.credentials = Credentials(
+            token=None,
+            refresh_token=self.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            scopes=["https://www.googleapis.com/auth/business.manage"],
+        )
+        return self.credentials
+
     def get_auth_url(self, state: Optional[str] = None) -> str:
         """
         Generate OAuth2 authorization URL for user to visit.
@@ -126,19 +146,8 @@ class GoogleBusinessClient:
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
             
-            if not self.credentials and self.refresh_token:
-                # Create credentials from refresh token
-                self.credentials = Credentials(
-                    token=None,
-                    refresh_token=self.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=self.client_id,
-                    client_secret=self.client_secret,
-                    scopes=["https://www.googleapis.com/auth/business.manage"],
-                )
-            
             if not self.credentials:
-                raise ValueError("No credentials available. Run OAuth flow first.")
+                self._ensure_credentials()
             
             # Build the service
             # Note: Using mybusinessaccountmanagement and mybusinessbusinessinformation APIs
@@ -166,17 +175,7 @@ class GoogleBusinessClient:
         try:
             from googleapiclient.discovery import build
             
-            # Ensure credentials are initialized from refresh token
-            if not self.credentials and self.refresh_token:
-                from google.oauth2.credentials import Credentials
-                self.credentials = Credentials(
-                    token=None,
-                    refresh_token=self.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=self.client_id,
-                    client_secret=self.client_secret,
-                    scopes=["https://www.googleapis.com/auth/business.manage"],
-                )
+            self._ensure_credentials()
             
             # Need to use mybusinessaccountmanagement for accounts
             account_service = build(
@@ -239,18 +238,8 @@ class GoogleBusinessClient:
         """
         try:
             from googleapiclient.discovery import build
-            from google.oauth2.credentials import Credentials
             
-            # Ensure credentials are initialized from refresh token
-            if not self.credentials and self.refresh_token:
-                self.credentials = Credentials(
-                    token=None,
-                    refresh_token=self.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=self.client_id,
-                    client_secret=self.client_secret,
-                    scopes=["https://www.googleapis.com/auth/business.manage"],
-                )
+            self._ensure_credentials()
             
             # Reviews use the classic mybusiness API (still available)
             reviews_service = build(
@@ -306,6 +295,7 @@ class GoogleBusinessClient:
         """
         try:
             from googleapiclient.discovery import build
+            self._ensure_credentials()
             
             # Reviews use the classic mybusiness API
             reviews_service = build(
@@ -346,6 +336,7 @@ class GoogleBusinessClient:
         """
         try:
             from googleapiclient.discovery import build
+            self._ensure_credentials()
             
             reviews_service = build(
                 "mybusiness",

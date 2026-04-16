@@ -88,17 +88,17 @@ class SMSHandler:
             sms = self.client.messages.create(
                 body=message,
                 from_=self.from_number,
-                to=recipient_phone,
+                to=phone,
             )
             log_entry = {
                 "timestamp": timestamp,
-                "to": recipient_phone,
+                "to": phone,
                 "from": self.from_number,
                 "body": message,
                 "message_sid": sms.sid,
                 "status": sms.status,
             }
-            logger.info(f"SMS sent to {recipient_phone} (SID: {sms.sid})")
+            logger.info(f"SMS sent to {phone} (SID: {sms.sid})")
             return {
                 "success": True,
                 "message_sid": sms.sid,

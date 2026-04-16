@@ -4,6 +4,7 @@ Configuration management for TradeReply
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 class ConfigError(RuntimeError):
@@ -38,6 +39,9 @@ class Config:
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", 8000))
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
+    EDIT_LINK_SIGNING_SECRET = os.getenv("EDIT_LINK_SIGNING_SECRET", "")
+    EDIT_LINK_TTL_HOURS = int(os.getenv("EDIT_LINK_TTL_HOURS", "72"))
 
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -112,6 +116,26 @@ class Config:
                 issues.append("GEMINI_API_KEY missing while DRY_RUN_AI=false")
 
         return issues
+
+    @classmethod
+    def public_base_url(cls) -> str:
+        if cls.PUBLIC_BASE_URL:
+            return cls.PUBLIC_BASE_URL.rstrip("/")
+
+        if cls.GOOGLE_REDIRECT_URI:
+            parsed = urlparse(cls.GOOGLE_REDIRECT_URI)
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+
+        return f"http://localhost:{cls.PORT}"
+
+    @classmethod
+    def edit_link_signing_secret(cls) -> str:
+        if cls.EDIT_LINK_SIGNING_SECRET:
+            return cls.EDIT_LINK_SIGNING_SECRET
+        if cls.TWILIO_AUTH_TOKEN:
+            return cls.TWILIO_AUTH_TOKEN
+        return "tradereply-dev-signing-secret"
 
 
 class DevelopmentConfig(Config):

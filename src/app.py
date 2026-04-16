@@ -5,6 +5,11 @@ Main webhook endpoint and API for the review response system
 
 import logging
 import uuid
+import json
+import base64
+import hmac
+import hashlib
+import time
 from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, Form
@@ -26,6 +31,7 @@ from models import (
     Review,
     DraftResponse,
     PendingApproval,
+    Response as StoredResponse,
     StarRating,
     ApprovalStatus,
 )
@@ -93,6 +99,62 @@ class GoogleConnectRequest(BaseModel):
     business_id: Optional[str] = None  # If None, create new business
 
 
+def _approval_edit_url(approval_id: str) -> str:
+    token = _generate_approval_token(approval_id)
+    return f"{config.public_base_url()}/approvals/edit?token={token}"
+
+
+def _urlsafe_b64encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _urlsafe_b64decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _generate_approval_token(approval_id: str) -> str:
+    expires_at = int(time.time()) + (config.EDIT_LINK_TTL_HOURS * 3600)
+    payload = {"approval_id": approval_id, "exp": expires_at}
+    payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    payload_b64 = _urlsafe_b64encode(payload_bytes)
+    signature = hmac.new(
+        config.edit_link_signing_secret().encode(),
+        payload_b64.encode(),
+        hashlib.sha256,
+    ).digest()
+    return f"{payload_b64}.{_urlsafe_b64encode(signature)}"
+
+
+def _verify_approval_token(token: str) -> str:
+    try:
+        payload_b64, signature_b64 = token.split(".", 1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid approval token")
+
+    expected_signature = hmac.new(
+        config.edit_link_signing_secret().encode(),
+        payload_b64.encode(),
+        hashlib.sha256,
+    ).digest()
+    provided_signature = _urlsafe_b64decode(signature_b64)
+    if not hmac.compare_digest(expected_signature, provided_signature):
+        raise HTTPException(status_code=400, detail="Approval token signature is invalid")
+
+    try:
+        payload = json.loads(_urlsafe_b64decode(payload_b64).decode())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Approval token payload is invalid") from exc
+
+    approval_id = payload.get("approval_id")
+    expires_at = payload.get("exp")
+    if not approval_id or not isinstance(expires_at, int):
+        raise HTTPException(status_code=400, detail="Approval token payload is incomplete")
+    if expires_at < int(time.time()):
+        raise HTTPException(status_code=400, detail="Approval token has expired")
+    return approval_id
+
+
 # ==================== LIFECYCLE ====================
 
 
@@ -152,18 +214,13 @@ async def startup_event():
                                     google_review_id=parsed["google_review_id"],
                                     google_review_name=parsed["google_review_name"])
                                 db.create_review(rev)
-                                draft_text = ai_handler.generate_response(rev, business)
-                                dr = DraftResponse(id=str(uuid.uuid4()), review_id=rid,
-                                    business_id=business.id, draft_text=draft_text, status="drafted")
-                                db.create_draft_response(dr)
-                                sms_msg = build_sms_approval_message(parsed["reviewer_name"],
-                                    StarRating(parsed["rating"]), parsed["review_text"], draft_text)
-                                sms_handler.send_approval_request(business.sms_recipient, sms_msg)
-                                appr = PendingApproval(id=str(uuid.uuid4()),
-                                    draft_response_id=dr.id, business_id=business.id,
-                                    sms_sent_at=datetime.utcnow(), status=ApprovalStatus.PENDING,
-                                    sms_message=sms_msg)
-                                db.create_pending_approval(appr)
+                                try:
+                                    _create_draft_and_send_approval(rev, business)
+                                except HTTPException as flow_error:
+                                    logger.error(
+                                        f"[SYNC] Failed to process review {rev.id} for {business.name}: "
+                                        f"{flow_error.detail}"
+                                    )
                                 logger.info(f"[SYNC] New review: {parsed['reviewer_name']} for {business.name}")
                         except Exception as biz_err:
                             logger.error(f"[SYNC] Error syncing {business.name}: {biz_err}")
@@ -174,6 +231,302 @@ async def startup_event():
             await asyncio.sleep(300)  # Every 5 minutes
     
     asyncio.create_task(periodic_sync())
+
+
+def _create_draft_and_send_approval(review: Review, business: Business) -> dict:
+    """Generate an AI draft, send the SMS approval request, and persist tracking records."""
+    draft_text = ai_handler.generate_response(review, business)
+    logger.info(f"Generated draft for review {review.id}")
+
+    draft_id = str(uuid.uuid4())
+    draft = DraftResponse(
+        id=draft_id,
+        review_id=review.id,
+        business_id=business.id,
+        draft_text=draft_text,
+        status="drafted",
+    )
+
+    if not db.create_draft_response(draft):
+        logger.error(f"Failed to store draft for review {review.id}")
+        raise HTTPException(status_code=400, detail="Failed to store draft")
+
+    db.create_audit_event(
+        event_type="draft_created",
+        business_id=business.id,
+        review_id=review.id,
+        draft_id=draft_id,
+        message="AI draft created",
+    )
+
+    approval_id = str(uuid.uuid4())
+
+    sms_message = build_sms_approval_message(
+        review.reviewer_name,
+        review.rating,
+        review.review_text,
+        draft_text,
+        approval_id=approval_id,
+        edit_url=_approval_edit_url(approval_id),
+    )
+
+    sms_result = sms_handler.send_approval_request(
+        business.sms_recipient,
+        sms_message,
+    )
+
+    if not sms_result["success"]:
+        db.update_draft_status(draft_id, "sms_failed")
+        db.create_audit_event(
+            event_type="sms_approval_failed",
+            business_id=business.id,
+            review_id=review.id,
+            draft_id=draft_id,
+            message="Failed to send SMS approval request",
+            payload=sms_result,
+        )
+        logger.error(f"Failed to send SMS for review {review.id}")
+        raise HTTPException(status_code=502, detail="Failed to send SMS")
+
+    approval = PendingApproval(
+        id=approval_id,
+        draft_response_id=draft_id,
+        business_id=business.id,
+        sms_sent_at=datetime.utcnow(),
+        status=ApprovalStatus.PENDING,
+        sms_message=sms_message,
+    )
+
+    if not db.create_pending_approval(approval):
+        logger.error(f"Failed to create approval record for review {review.id}")
+        raise HTTPException(status_code=400, detail="Failed to create approval")
+
+    db.update_draft_status(draft_id, "awaiting_approval")
+    db.create_audit_event(
+        event_type="sms_approval_sent",
+        business_id=business.id,
+        review_id=review.id,
+        draft_id=draft_id,
+        approval_id=approval_id,
+        message="SMS approval request sent",
+        payload={"sms_recipient": business.sms_recipient},
+    )
+
+    logger.info(
+        f"SMS approval request sent for review {review.id} to {business.sms_recipient}"
+    )
+
+    return {
+        "draft_id": draft_id,
+        "approval_id": approval_id,
+        "draft_text": draft_text,
+        "sms_sent_to": business.sms_recipient,
+    }
+
+
+def _attempt_auto_post_for_approval(approval: PendingApproval) -> dict:
+    """Attempt to post an approved draft directly to Google and persist result."""
+    draft = db.get_draft_response(approval.draft_response_id)
+    review = db.get_review(draft.review_id) if draft else None
+    business = db.get_business(approval.business_id) if approval.business_id else None
+
+    missing = []
+    if not draft:
+        missing.append("draft")
+    if not review:
+        missing.append("review")
+    if not business:
+        missing.append("business")
+    if review and not review.google_review_name:
+        missing.append("google_review_name")
+    if business and not business.google_refresh_token:
+        missing.append("google_refresh_token")
+
+    if missing:
+        logger.info(f"Skipping auto-post for approval {approval.id}: missing {', '.join(missing)}")
+        return {"success": False, "reason": "missing_prerequisites", "missing": missing}
+
+    try:
+        from google_client import GoogleBusinessClient
+
+        google_client = GoogleBusinessClient(
+            client_id=config.GOOGLE_CLIENT_ID,
+            client_secret=config.GOOGLE_CLIENT_SECRET,
+            redirect_uri=config.GOOGLE_REDIRECT_URI,
+            refresh_token=business.google_refresh_token,
+        )
+
+        result = google_client.post_reply(
+            review_name=review.google_review_name,
+            reply_text=draft.draft_text,
+        )
+
+        db.update_draft_status(draft.id, "posted")
+        db.update_approval_status(approval.id, ApprovalStatus.POSTED, datetime.utcnow())
+        db.create_response(
+            StoredResponse(
+                id=str(uuid.uuid4()),
+                review_id=draft.review_id,
+                business_id=draft.business_id,
+                response_text=draft.draft_text,
+                posted_at=datetime.utcnow(),
+            )
+        )
+        db.create_audit_event(
+            event_type="google_reply_posted",
+            business_id=approval.business_id,
+            review_id=draft.review_id,
+            draft_id=draft.id,
+            approval_id=approval.id,
+            message="Reply auto-posted to Google Business Profile",
+            payload={"review_name": review.google_review_name, "result": result},
+        )
+        logger.info(f"Auto-posted reply to Google for review {review.google_review_name}")
+        return {"success": True, "result": result}
+    except Exception as post_error:
+        db.update_draft_status(draft.id, "post_failed")
+        db.update_approval_status(approval.id, ApprovalStatus.POST_FAILED, datetime.utcnow())
+        db.create_audit_event(
+            event_type="google_reply_post_failed",
+            business_id=approval.business_id,
+            review_id=draft.review_id if draft else None,
+            draft_id=draft.id if draft else None,
+            approval_id=approval.id,
+            message="Failed to auto-post reply to Google Business Profile",
+            payload={"error": str(post_error)},
+        )
+        logger.error(f"Failed to auto-post to Google: {post_error}")
+        return {"success": False, "reason": "post_failed", "error": str(post_error)}
+
+
+def _build_business_summary(business: Business) -> dict:
+    metrics = db.get_business_metrics(business.id)
+    return {
+        "business_id": business.id,
+        "name": business.name,
+        "phone": business.phone,
+        "sms_recipient": business.sms_recipient,
+        "google_connected": bool(business.google_refresh_token),
+        "google_location_id": business.google_location_id,
+        "google_account_id": business.google_account_id,
+        "response_tone": business.response_tone,
+        "metrics": metrics,
+    }
+
+
+def _load_approval_context_or_404(approval_id: str) -> tuple[PendingApproval, DraftResponse, Review, Business]:
+    approval = db.get_pending_approval(approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+
+    draft = db.get_draft_response(approval.draft_response_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    review = db.get_review(draft.review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    business = db.get_business(approval.business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    return approval, draft, review, business
+
+
+def _render_edit_approval_page(
+    approval: PendingApproval,
+    draft: DraftResponse,
+    review: Review,
+    business: Business,
+    *,
+    token: str,
+    flash_message: str = "",
+    error_message: str = "",
+) -> HTMLResponse:
+    is_pending = approval.status == ApprovalStatus.PENDING
+    button_disabled = "" if is_pending else "disabled"
+    readonly = "" if is_pending else "readonly"
+    status_label = approval.status.value.replace("_", " ").title()
+    google_state = (
+        "Connected and ready to post automatically"
+        if business.google_refresh_token and review.google_review_name
+        else "Not fully connected for auto-post yet"
+    )
+    flash_html = f'<div class="flash success">{flash_message}</div>' if flash_message else ""
+    error_html = f'<div class="flash error">{error_message}</div>' if error_message else ""
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>TradeReply - Edit Reply</title>
+      <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%); min-height:100vh; padding:24px; }}
+        .container {{ max-width:820px; margin:0 auto; }}
+        .card {{ background:white; border-radius:18px; padding:24px; box-shadow:0 12px 32px rgba(0,0,0,0.12); margin-bottom:18px; }}
+        h1 {{ margin:0 0 8px; color:#1e3a8a; }}
+        h2 {{ margin:0 0 12px; color:#0f172a; font-size:1.1rem; }}
+        p {{ color:#475569; line-height:1.5; }}
+        .meta {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:16px; }}
+        .meta-item {{ background:#f8fafc; padding:12px 14px; border-radius:12px; }}
+        .meta-item strong {{ display:block; color:#1e3a8a; margin-bottom:4px; font-size:0.92rem; }}
+        .review-box {{ background:#f8fafc; border-radius:14px; padding:18px; border-left:4px solid #06b6d4; }}
+        textarea {{ width:100%; min-height:220px; border-radius:14px; border:1px solid #cbd5e1; padding:16px; font:inherit; line-height:1.5; resize:vertical; }}
+        .actions {{ display:flex; flex-wrap:wrap; gap:12px; margin-top:16px; }}
+        button {{ border:none; border-radius:12px; padding:14px 18px; font-weight:700; cursor:pointer; }}
+        button.primary {{ background:#06b6d4; color:white; }}
+        button.secondary {{ background:#e2e8f0; color:#0f172a; }}
+        button.reject {{ background:#fee2e2; color:#b91c1c; }}
+        button[disabled] {{ opacity:0.55; cursor:not-allowed; }}
+        .flash {{ border-radius:12px; padding:14px 16px; margin-bottom:16px; font-weight:600; }}
+        .flash.success {{ background:#ecfdf5; color:#166534; border:1px solid #bbf7d0; }}
+        .flash.error {{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }}
+        .status-pill {{ display:inline-block; padding:8px 12px; border-radius:999px; background:#e0f2fe; color:#075985; font-weight:700; font-size:0.85rem; }}
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        {flash_html}
+        {error_html}
+        <div class="card">
+          <h1>Edit Reply</h1>
+          <p>Review the AI draft for <strong>{business.name}</strong>, make any changes you want, then approve and post when you're happy.</p>
+          <div class="meta">
+            <div class="meta-item"><strong>Status</strong><span class="status-pill">{status_label}</span></div>
+            <div class="meta-item"><strong>Reviewer</strong>{review.reviewer_name}</div>
+            <div class="meta-item"><strong>Rating</strong>{review.rating.value} star</div>
+            <div class="meta-item"><strong>Google</strong>{google_state}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Original review</h2>
+          <div class="review-box">
+            <p>{review.review_text or "No review text was supplied."}</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Your draft reply</h2>
+          <form method="post" action="/approvals/edit">
+            <input type="hidden" name="token" value="{token}">
+            <textarea name="draft_text" {readonly}>{draft.draft_text}</textarea>
+            <div class="actions">
+              <button class="secondary" type="submit" name="action" value="save" {button_disabled}>Save draft</button>
+              <button class="primary" type="submit" name="action" value="approve" {button_disabled}>Approve &amp; post</button>
+              <button class="reject" type="submit" name="action" value="reject" {button_disabled}>Reject</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 
 @app.on_event("shutdown")
@@ -261,7 +614,9 @@ async def get_business(business_id: str):
         "description": business.description,
         "google_location_id": business.google_location_id,
         "google_account_id": business.google_account_id,
+        "google_connected": bool(business.google_refresh_token),
         "response_tone": business.response_tone,
+        "metrics": db.get_business_metrics(business.id),
         "created_at": business.created_at.isoformat(),
     }
 
@@ -273,15 +628,23 @@ async def list_businesses_api():
     return [
         {
             "id": b.id,
-            "name": b.name,
-            "phone": b.phone,
-            "sms_recipient": b.sms_recipient,
-            "google_location_id": b.google_location_id,
-            "google_account_id": b.google_account_id,
-            "response_tone": b.response_tone,
+            **_build_business_summary(b),
         }
         for b in businesses
     ]
+
+
+@app.get("/businesses/{business_id}/metrics")
+async def get_business_metrics_api(business_id: str):
+    """Get operational metrics for a single business."""
+    business = db.get_business(business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    return {
+        "business_id": business.id,
+        "name": business.name,
+        "metrics": db.get_business_metrics(business.id),
+    }
 
 
 @app.get("/businesses", response_class=HTMLResponse)
@@ -289,7 +652,26 @@ async def list_businesses_html():
     """List all businesses (UI)"""
     businesses = db.list_businesses()
     count = len(businesses)
-    cards = "".join([f'<div class="card"><h3>{b.name}</h3><p>ID: {b.id}</p><p>Phone: {b.phone or "N/A"}</p></div>' for b in businesses]) if businesses else '<p class="empty">No businesses yet. <a href="/onboard">Add one</a></p>'
+    cards = ""
+    for b in businesses:
+        summary = _build_business_summary(b)
+        metrics = summary["metrics"]
+        cards += f"""
+        <div class="card">
+          <h3>{b.name}</h3>
+          <p><strong>Phone:</strong> {b.phone or "N/A"}</p>
+          <p><strong>SMS:</strong> {b.sms_recipient or "N/A"}</p>
+          <p><strong>Google:</strong> {"Connected" if summary["google_connected"] else "Not connected"}</p>
+          <div class="mini-stats">
+            <span>Reviews: {metrics['reviews_received']}</span>
+            <span>Drafts: {metrics['drafts_generated']}</span>
+            <span>Approved: {metrics['approved'] + metrics['posted']}</span>
+            <span>Posted: {metrics['posted']}</span>
+          </div>
+        </div>
+        """
+    if not cards:
+        cards = '<p class="empty">No businesses yet. <a href="/onboard">Add one</a></p>'
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>TradeReply - Businesses</title>
 <style>
@@ -307,6 +689,8 @@ body {{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1
 .card {{background:#f8fafc;padding:15px;border-radius:8px;margin-bottom:10px;border-left:4px solid #06b6d4}}
 .card h3 {{color:#1e3a8a;margin:0 0 5px 0}}
 .card p {{color:#64748b;font-size:0.9em;margin:3px 0}}
+.mini-stats {{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}}
+.mini-stats span {{background:white;padding:8px 10px;border-radius:8px;color:#1e3a8a;font-weight:600;font-size:0.85em}}
 .empty {{color:#94a3b8;text-align:center;padding:20px}}
 .empty a {{color:#06b6d4}}
 </style>
@@ -360,86 +744,15 @@ async def submit_review(review_request: ReviewRequest):
 
         logger.info(f"Created review: {review_id} for business {review_request.business_id}")
 
-        # Generate AI draft response
-        draft_text = ai_handler.generate_response(review, business)
-        logger.info(f"Generated draft for review {review_id}")
-
-        # Store draft in database
-        draft_id = str(uuid.uuid4())
-        draft = DraftResponse(
-            id=draft_id,
-            review_id=review_id,
-            business_id=review_request.business_id,
-            draft_text=draft_text,
-            status="drafted",
-        )
-
-        if not db.create_draft_response(draft):
-            logger.error(f"Failed to store draft for review {review_id}")
-            raise HTTPException(status_code=400, detail="Failed to store draft")
-
-        db.create_audit_event(
-            event_type="draft_created",
-            business_id=review_request.business_id,
-            review_id=review_id,
-            draft_id=draft_id,
-            message="AI draft created",
-        )
-
-        # Build and send SMS approval request
-        sms_message = build_sms_approval_message(
-            review_request.reviewer_name,
-            StarRating(review_request.rating),
-            review_request.review_text,
-            draft_text,
-        )
-
-        sms_result = sms_handler.send_approval_request(
-            business.sms_recipient,
-            sms_message,
-        )
-
-        if not sms_result["success"]:
-            logger.error(f"Failed to send SMS for review {review_id}")
-            raise HTTPException(status_code=400, detail="Failed to send SMS")
-
-        # Create pending approval record
-        approval_id = str(uuid.uuid4())
-        approval = PendingApproval(
-            id=approval_id,
-            draft_response_id=draft_id,
-            business_id=review_request.business_id,
-            sms_sent_at=datetime.utcnow(),
-            status=ApprovalStatus.PENDING,
-            sms_message=sms_message,
-        )
-
-        if not db.create_pending_approval(approval):
-            logger.error(f"Failed to create approval record for review {review_id}")
-            raise HTTPException(status_code=400, detail="Failed to create approval")
-
-        db.update_draft_status(draft_id, "awaiting_approval")
-        db.create_audit_event(
-            event_type="sms_approval_sent",
-            business_id=review_request.business_id,
-            review_id=review_id,
-            draft_id=draft_id,
-            approval_id=approval_id,
-            message="SMS approval request sent",
-            payload={"sms_recipient": business.sms_recipient},
-        )
-
-        logger.info(
-            f"SMS approval request sent for review {review_id} to {business.sms_recipient}"
-        )
+        flow = _create_draft_and_send_approval(review, business)
 
         return {
             "review_id": review_id,
-            "draft_id": draft_id,
-            "approval_id": approval_id,
+            "draft_id": flow["draft_id"],
+            "approval_id": flow["approval_id"],
             "status": "awaiting_approval",
-            "draft": draft_text,
-            "sms_sent_to": business.sms_recipient,
+            "draft": flow["draft_text"],
+            "sms_sent_to": flow["sms_sent_to"],
         }
 
     except HTTPException:
@@ -512,12 +825,17 @@ async def process_approval(approval_id: str, response: ApprovalResponse):
         )
 
         logger.info(f"Approval {approval_id} marked as {new_status.value}")
-
-        return {
+        result = {
             "approval_id": approval_id,
             "status": new_status.value,
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+        if response.approved:
+            auto_post_result = _attempt_auto_post_for_approval(approval)
+            result["auto_post"] = auto_post_result
+
+        return result
 
     except HTTPException:
         raise
@@ -544,6 +862,139 @@ async def get_pending_approvals(business_id: str):
         }
         for a in approvals
     ]
+
+
+@app.get("/approvals/edit", response_class=HTMLResponse)
+async def edit_approval_page(token: str):
+    """Render a simple owner-facing page to edit the draft before posting."""
+    approval_id = _verify_approval_token(token)
+    approval, draft, review, business = _load_approval_context_or_404(approval_id)
+    return _render_edit_approval_page(approval, draft, review, business, token=token)
+
+
+@app.post("/approvals/edit", response_class=HTMLResponse)
+async def update_approval_from_edit_page(
+    token: str = Form(...),
+    action: str = Form(...),
+    draft_text: str = Form(""),
+):
+    """Handle save / approve / reject actions from the owner edit page."""
+    approval_id = _verify_approval_token(token)
+    approval, draft, review, business = _load_approval_context_or_404(approval_id)
+
+    if approval.status != ApprovalStatus.PENDING:
+        return _render_edit_approval_page(
+            approval,
+            draft,
+            review,
+            business,
+            token=token,
+            error_message="This approval is no longer pending, so it can’t be changed here.",
+        )
+
+    cleaned_draft = draft_text.strip()
+    if not cleaned_draft:
+        return _render_edit_approval_page(
+            approval,
+            draft,
+            review,
+            business,
+            token=token,
+            error_message="Reply text cannot be empty.",
+        )
+
+    if cleaned_draft != draft.draft_text:
+        db.update_draft_text(draft.id, cleaned_draft)
+        db.create_audit_event(
+            event_type="draft_edited",
+            business_id=business.id,
+            review_id=review.id,
+            draft_id=draft.id,
+            approval_id=approval.id,
+            message="Draft edited from approval page",
+        )
+        draft = db.get_draft_response(draft.id) or draft
+
+    if action == "save":
+        return _render_edit_approval_page(
+            approval,
+            draft,
+            review,
+            business,
+            token=token,
+            flash_message="Draft saved. You can still approve or reject it from this page.",
+        )
+
+    if action == "reject":
+        db.update_approval_status(approval.id, ApprovalStatus.REJECTED, datetime.utcnow())
+        db.update_draft_status(draft.id, "rejected")
+        db.create_audit_event(
+            event_type="approval_rejected_from_edit_page",
+            business_id=business.id,
+            review_id=review.id,
+            draft_id=draft.id,
+            approval_id=approval.id,
+            message="Draft rejected from edit page",
+        )
+        approval = db.get_pending_approval(approval.id) or approval
+        return _render_edit_approval_page(
+            approval,
+            draft,
+            review,
+            business,
+            token=token,
+            flash_message="Reply rejected. TradeReply recorded that decision.",
+        )
+
+    if action == "approve":
+        db.update_approval_status(approval.id, ApprovalStatus.APPROVED, datetime.utcnow())
+        db.update_draft_status(draft.id, "approved")
+        db.create_audit_event(
+            event_type="approval_approved_from_edit_page",
+            business_id=business.id,
+            review_id=review.id,
+            draft_id=draft.id,
+            approval_id=approval.id,
+            message="Draft approved from edit page",
+        )
+        approval = db.get_pending_approval(approval.id) or approval
+        auto_post_result = _attempt_auto_post_for_approval(approval)
+        if auto_post_result["success"]:
+            approval = db.get_pending_approval(approval.id) or approval
+            draft = db.get_draft_response(draft.id) or draft
+            return _render_edit_approval_page(
+                approval,
+                draft,
+                review,
+                business,
+                token=token,
+                flash_message="Reply approved and posted to Google successfully.",
+            )
+
+        message = (
+            "Reply approved, but Google is not fully connected for this business yet."
+            if auto_post_result.get("reason") == "missing_prerequisites"
+            else "Reply approved, but the Google post failed and needs follow-up."
+        )
+        approval = db.get_pending_approval(approval.id) or approval
+        draft = db.get_draft_response(draft.id) or draft
+        return _render_edit_approval_page(
+            approval,
+            draft,
+            review,
+            business,
+            token=token,
+            flash_message=message,
+        )
+
+    return _render_edit_approval_page(
+        approval,
+        draft,
+        review,
+        business,
+        token=token,
+        error_message="Unknown action. Please try again.",
+    )
 
 
 @app.post("/businesses/{business_id}/mapping")
@@ -615,7 +1066,7 @@ async def manual_post_action(draft_id: str, action: ManualPostAction):
     db.update_draft_status(draft_id, action.action)
 
     if action.action == "posted":
-        response = Response(
+        response = StoredResponse(
             id=str(uuid.uuid4()),
             review_id=draft.review_id,
             business_id=draft.business_id,
@@ -728,54 +1179,17 @@ async def twilio_inbound_webhook(
         except Exception as confirm_error:
             logger.warning(f"Failed to send confirmation SMS: {confirm_error}")
 
-        # If approved, auto-post to Google Business Profile
+        # If approved, auto-post to Google Business Profile when possible
         if parsed:
-            try:
-                draft = db.get_draft_response(approval.draft_response_id)
-                if draft:
-                    review = db.get_review(draft.review_id)
-                    business = db.get_business(approval.business_id) if approval.business_id else None
-                    
-                    if review and business and review.google_review_name and business.google_refresh_token:
-                        from google_client import GoogleBusinessClient
-                        
-                        google_client = GoogleBusinessClient(
-                            client_id=config.GOOGLE_CLIENT_ID,
-                            client_secret=config.GOOGLE_CLIENT_SECRET,
-                            redirect_uri=config.GOOGLE_REDIRECT_URI,
-                            refresh_token=business.google_refresh_token,
-                        )
-                        
-                        result = google_client.post_reply(
-                            review_name=review.google_review_name,
-                            reply_text=draft.draft_text,
-                        )
-                        
-                        db.create_audit_event(
-                            event_type="google_reply_posted",
-                            business_id=approval.business_id,
-                            draft_id=approval.draft_response_id,
-                            approval_id=approval.id,
-                            message="Reply auto-posted to Google Business Profile",
-                            payload={"review_name": review.google_review_name, "result": str(result)},
-                        )
-                        logger.info(f"Auto-posted reply to Google for review {review.google_review_name}")
-                    else:
-                        missing = []
-                        if not review:
-                            missing.append("review")
-                        if not business:
-                            missing.append("business")
-                        if review and not review.google_review_name:
-                            missing.append("google_review_name")
-                        if business and not business.google_refresh_token:
-                            missing.append("google_refresh_token")
-                        logger.info(f"Skipping auto-post: missing {', '.join(missing)}")
-            except Exception as post_error:
-                logger.error(f"Failed to auto-post to Google: {post_error}")
-                # Don't fail the approval if auto-post fails
-            
-            return "Approved. TradeReply recorded your YES response."
+            auto_post_result = _attempt_auto_post_for_approval(approval)
+            if auto_post_result["success"]:
+                return "Approved and posted. TradeReply published your reply to Google."
+
+            if auto_post_result.get("reason") == "missing_prerequisites":
+                return "Approved. TradeReply recorded your YES response, but this business still needs Google connection details before auto-posting."
+
+            return "Approved. TradeReply recorded your YES response, but the Google post failed and has been flagged for follow-up."
+
         return "Rejected. TradeReply recorded your NO response."
 
     except Exception as e:
@@ -1051,41 +1465,12 @@ async def sync_google_reviews(business_id: str):
             
             if db.create_review(review):
                 new_reviews.append(parsed)
-                
-                # Generate AI draft and send SMS approval
-                draft_text = ai_handler.generate_response(review, business)
-                
-                draft_id = str(uuid.uuid4())
-                draft = DraftResponse(
-                    id=draft_id,
-                    review_id=review_id,
-                    business_id=business_id,
-                    draft_text=draft_text,
-                    status="drafted",
-                )
-                db.create_draft_response(draft)
-                
-                # Send SMS for approval
-                sms_message = build_sms_approval_message(
-                    parsed["reviewer_name"],
-                    StarRating(parsed["rating"]),
-                    parsed["review_text"],
-                    draft_text,
-                )
-                
-                sms_handler.send_approval_request(business.sms_recipient, sms_message)
-                
-                # Create pending approval
-                approval_id = str(uuid.uuid4())
-                approval = PendingApproval(
-                    id=approval_id,
-                    draft_response_id=draft_id,
-                    business_id=business_id,
-                    sms_sent_at=datetime.utcnow(),
-                    status=ApprovalStatus.PENDING,
-                    sms_message=sms_message,
-                )
-                db.create_pending_approval(approval)
+                try:
+                    _create_draft_and_send_approval(review, business)
+                except HTTPException as flow_error:
+                    logger.error(
+                        f"Failed to create/send approval for synced review {review_id}: {flow_error.detail}"
+                    )
         
         db.create_audit_event(
             event_type="google_reviews_synced",
@@ -1121,12 +1506,26 @@ async def get_audit_events(limit: int = 100, business_id: Optional[str] = None):
 async def ops_dashboard():
     """Minimal operator dashboard for pilot operations."""
     businesses = db.list_businesses()
+    business_cards = []
     pending = []
     ready = []
     posted = []
     failed = []
 
     for business in businesses:
+        summary = _build_business_summary(business)
+        metrics = summary["metrics"]
+        business_cards.append(
+            {
+                "name": business.name,
+                "google_connected": summary["google_connected"],
+                "reviews_received": metrics["reviews_received"],
+                "drafts_generated": metrics["drafts_generated"],
+                "awaiting_approval": metrics["awaiting_approval"],
+                "posted": metrics["posted"],
+                "post_failed": metrics["post_failed"],
+            }
+        )
         pending.extend([
             {"business": business.name, "approval_id": a.id, "sms_sent_at": a.sms_sent_at.isoformat(), "status": a.status.value}
             for a in db.get_pending_approvals_by_business(business.id)
@@ -1158,6 +1557,24 @@ async def ops_dashboard():
             elif kind=='failed':
                 rows.append(f"<li><strong>{x['business']}</strong> • draft {x['draft_id']}<br><span class='muted'>{x['text']}</span></li>")
         return '<ul>' + ''.join(rows) + '</ul>'
+
+    business_summary_html = ''.join(
+        [
+            f"""
+            <div class="biz-card">
+              <h3>{card['name']}</h3>
+              <p class="muted">{'Google connected' if card['google_connected'] else 'Google not connected'}</p>
+              <div class="biz-metrics">
+                <span>Reviews {card['reviews_received']}</span>
+                <span>Drafts {card['drafts_generated']}</span>
+                <span>Pending {card['awaiting_approval']}</span>
+                <span>Posted {card['posted']}</span>
+              </div>
+            </div>
+            """
+            for card in business_cards
+        ]
+    ) or '<div class="empty">No connected businesses yet</div>'
 
     html = f"""
     <!DOCTYPE html>
@@ -1193,6 +1610,11 @@ async def ops_dashboard():
         .workflow-step {{ background: white; padding: 15px 20px; border-radius: 8px; flex: 1; min-width: 150px; }}
         .workflow-step .step-num {{ background: #06b6d4; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; margin-bottom: 8px; }}
         .workflow-step .step-text {{ color: #1e3a8a; font-weight: 600; }}
+        .biz-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }}
+        .biz-card {{ background:#f8fafc; border-radius:10px; padding:16px; border-left:4px solid #06b6d4; }}
+        .biz-card h3 {{ color:#1e3a8a; margin-bottom:6px; }}
+        .biz-metrics {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }}
+        .biz-metrics span {{ background:white; padding:8px 10px; border-radius:8px; color:#1e3a8a; font-weight:600; font-size:0.9em; }}
         .alert {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
         .alert strong {{ color: #92400e; }}
         ul {{ padding-left: 20px; }}
@@ -1215,7 +1637,7 @@ async def ops_dashboard():
         </div>
         
         <div class="alert">
-          <strong>📋 Current Workflow:</strong> Customers paste reviews on Submit Review page → AI generates response → SMS approval (YES/NO) → Manual copy/paste to Google
+          <strong>📋 Automated Workflow:</strong> TradeReply checks connected Google Business Profiles → drafts a reply → sends an SMS approval → posts to Google automatically after YES
         </div>
         
         <div class="stats">
@@ -1242,25 +1664,30 @@ async def ops_dashboard():
           <div class="workflow-steps">
             <div class="workflow-step">
               <div class="step-num">1</div>
-              <div class="step-text">Customer gets review</div>
+              <div class="step-text">New Google review detected</div>
             </div>
             <div class="workflow-step">
               <div class="step-num">2</div>
-              <div class="step-text">Paste on Submit Review page</div>
+              <div class="step-text">AI drafts a reply</div>
             </div>
             <div class="workflow-step">
               <div class="step-num">3</div>
-              <div class="step-text">AI generates response</div>
+              <div class="step-text">Owner receives SMS</div>
             </div>
             <div class="workflow-step">
               <div class="step-num">4</div>
-              <div class="step-text">SMS approval (YES/NO)</div>
+              <div class="step-text">Reply YES or NO</div>
             </div>
             <div class="workflow-step">
               <div class="step-num">5</div>
-              <div class="step-text">Copy to Google</div>
+              <div class="step-text">Approved replies post automatically</div>
             </div>
           </div>
+        </div>
+
+        <div class="section">
+          <h2>🏢 Business Overview</h2>
+          <div class="biz-grid">{business_summary_html}</div>
         </div>
         
         <div class="section">
