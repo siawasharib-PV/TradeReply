@@ -453,6 +453,22 @@ def _review_stage_label(draft: Optional[DraftResponse], response_posted: bool) -
     return mapping.get(draft.status, draft.status.replace("_", " ").title())
 
 
+def _business_issues(summary: dict) -> list[str]:
+    metrics = summary["metrics"]
+    issues = []
+    if not summary["google_connected"]:
+        issues.append("Google not connected")
+    elif not summary.get("google_location_id"):
+        issues.append("Google location not mapped")
+    if metrics["post_failed"] > 0:
+        issues.append(f"{metrics['post_failed']} failed post{'s' if metrics['post_failed'] != 1 else ''}")
+    if metrics["awaiting_approval"] > 0:
+        issues.append(f"{metrics['awaiting_approval']} approval{'s' if metrics['awaiting_approval'] != 1 else ''} waiting")
+    if metrics["reviews_received"] > 0 and metrics["posted"] == 0 and metrics["approved"] == 0:
+        issues.append("No replies posted yet")
+    return issues
+
+
 def _render_business_dashboard_page(business: Business, flash_message: str = "", error_message: str = "") -> HTMLResponse:
     summary = _build_business_summary(business)
     metrics = summary["metrics"]
@@ -522,6 +538,7 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
         ("Google location mapped", bool(business.google_location_id)),
         ("First reply posted", metrics["posted"] > 0),
     ]
+    issues = _business_issues(summary)
     checklist_html = "".join(
         [
             f'<div class="check-row"><span class="check-icon {"done" if done else "todo"}">{"✓" if done else "•"}</span><span>{label}</span></div>'
@@ -603,6 +620,9 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
         .check-icon.done {{ background:#dcfce7; color:#166534; }}
         .check-icon.todo {{ background:#e2e8f0; color:#64748b; }}
         .text-link {{ color:#0891b2; font-weight:700; text-decoration:none; }}
+        .issue-pills {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }}
+        .issue-pill {{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; }}
+        .good-pill {{ display:inline-flex; background:#ecfdf5; color:#166534; border:1px solid #bbf7d0; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; margin-top:14px; }}
         @media (max-width: 720px) {{
           .container {{ max-width:100%; }}
           .card-shell {{ padding:26px 20px; }}
@@ -636,6 +656,7 @@ def _render_business_dashboard_page(business: Business, flash_message: str = "",
               <div class="eyebrow">Business dashboard</div>
               <h1>{business.name}</h1>
               <p>This workspace is only for <strong>{business.name}</strong>. Reviews, drafts, approvals, and posted replies are filtered to this business so nothing overlaps with any other customer account.</p>
+              {'<div class="issue-pills">' + ''.join([f'<span class="issue-pill">{issue}</span>' for issue in issues]) + '</div>' if issues else '<div class="good-pill">No immediate issues</div>'}
               <div class="hero-actions">
                 <a class="btn btn-primary" href="/businesses/{business.id}/sync-reviews">Check for new Google reviews</a>
                 <a class="btn btn-secondary" href="/businesses/{business.id}/approvals">View approvals</a>
@@ -970,6 +991,7 @@ async def list_businesses_html():
         summary = _build_business_summary(b)
         metrics = summary["metrics"]
         last_seen = _format_timestamp(metrics["last_review_at"])
+        issues = _business_issues(summary)
         cards += f"""
         <div class="card">
           <div class="card-top">
@@ -979,6 +1001,7 @@ async def list_businesses_html():
             </div>
             <a class="btn-link" href="/businesses/{b.id}/dashboard">Open dashboard</a>
           </div>
+          {'<div class="issue-pills">' + ''.join([f'<span class="issue-pill">{issue}</span>' for issue in issues]) + '</div>' if issues else '<div class="good-pill">No immediate issues</div>'}
           <p><strong>Phone:</strong> {b.phone or "N/A"}</p>
           <p><strong>SMS:</strong> {b.sms_recipient or "N/A"}</p>
           <p><strong>Google:</strong> {"Connected" if summary["google_connected"] else "Not connected"}</p>
@@ -1030,6 +1053,9 @@ body {{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1
 .mini-stats span {{background:white;padding:8px 10px;border-radius:8px;color:#1e3a8a;font-weight:600;font-size:0.85em}}
 .card-actions {{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}}
 .card-actions a,.btn-link {{color:#0891b2;font-weight:700;text-decoration:none}}
+.issue-pills {{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}}
+.issue-pill {{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:700}}
+.good-pill {{display:inline-flex;background:#ecfdf5;color:#166534;border:1px solid #bbf7d0;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:700;margin-bottom:12px}}
 .section-copy {{color:#64748b;line-height:1.6;margin-bottom:18px}}
 .empty {{color:#94a3b8;text-align:center;padding:20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px}}
 .empty a {{color:#06b6d4}}
@@ -1886,16 +1912,19 @@ async def ops_dashboard():
     ready = []
     posted = []
     failed = []
+    attention = []
 
     for business in businesses:
         summary = _build_business_summary(business)
         metrics = summary["metrics"]
+        issues = _business_issues(summary)
         business_cards.append(
             {
                 "id": business.id,
                 "name": business.name,
                 "google_connected": summary["google_connected"],
                 "google_location_id": summary["google_location_id"],
+                "issues": issues,
                 "reviews_received": metrics["reviews_received"],
                 "drafts_generated": metrics["drafts_generated"],
                 "awaiting_approval": metrics["awaiting_approval"],
@@ -1905,6 +1934,14 @@ async def ops_dashboard():
                 "last_review_at": metrics["last_review_at"],
             }
         )
+        if issues:
+            attention.append(
+                {
+                    "id": business.id,
+                    "business": business.name,
+                    "issues": issues,
+                }
+            )
         pending.extend([
             {"business": business.name, "approval_id": a.id, "sms_sent_at": a.sms_sent_at.isoformat(), "status": a.status.value}
             for a in db.get_pending_approvals_by_business(business.id)
@@ -1948,6 +1985,7 @@ async def ops_dashboard():
                 </div>
                 <a href="/businesses/{card['id']}/dashboard" class="text-link">Open workspace</a>
               </div>
+              {'<div class="issue-pills">' + ''.join([f'<span class="issue-pill">{issue}</span>' for issue in card['issues']]) + '</div>' if card['issues'] else '<div class="good-pill">No immediate issues</div>'}
               <div class="biz-metrics">
                 <span>Reviews {card['reviews_received']}</span>
                 <span>Drafts {card['drafts_generated']}</span>
@@ -1962,6 +2000,21 @@ async def ops_dashboard():
             for card in business_cards
         ]
     ) or '<div class="empty">No businesses yet. Add your first business from Setup.</div>'
+
+    attention_html = ''.join(
+        [
+            f"""
+            <div class="list-row">
+              <div>
+                <strong>{item['business']}</strong>
+                <p>{'; '.join(item['issues'])}</p>
+              </div>
+              <a href="/businesses/{item['id']}/dashboard" class="text-link">Review</a>
+            </div>
+            """
+            for item in attention
+        ]
+    ) or '<div class="empty">No businesses need attention right now.</div>'
 
     html = f"""
     <!DOCTYPE html>
@@ -2010,6 +2063,9 @@ async def ops_dashboard():
         .biz-metrics {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }}
         .biz-metrics span {{ background:white; padding:8px 10px; border-radius:8px; color:#1e3a8a; font-weight:600; font-size:0.9em; }}
         .biz-footer {{ margin-top:12px; color:#64748b; font-size:0.9em; }}
+        .issue-pills {{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }}
+        .issue-pill {{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; }}
+        .good-pill {{ display:inline-flex; background:#ecfdf5; color:#166534; border:1px solid #bbf7d0; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; margin-bottom:12px; }}
         .list-row {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }}
         .list-row strong {{ color:#1e3a8a; }}
         .list-row p {{ color:#64748b; margin-top:6px; line-height:1.5; }}
@@ -2099,6 +2155,12 @@ async def ops_dashboard():
             <h2>🏢 Business overview</h2>
             <p class="section-copy">Every signed-up business gets its own isolated workspace. Use these cards to jump into a single business and inspect its replies.</p>
             <div class="biz-grid">{business_summary_html}</div>
+          </div>
+
+          <div class="section">
+            <h2>🚨 Needs attention</h2>
+            <p class="section-copy">This is the quickest place to see if a business has setup gaps or reply issues that need follow-up.</p>
+            {attention_html}
           </div>
           
           <div class="section">
