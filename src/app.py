@@ -1931,35 +1931,37 @@ async def ops_dashboard():
       <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); min-height: 100vh; padding: 20px; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .container {{ max-width: 760px; margin: 0 auto; }}
         .header {{ text-align: center; color: white; margin-bottom: 30px; }}
-        .header h1 {{ font-size: 2.5em; margin-bottom: 10px; }}
+        .header h1 {{ font-size: 2.5em; margin-bottom: 4px; }}
         .header p {{ opacity: 0.9; font-size: 18px; }}
         .nav {{ background: white; border-radius: 12px; padding: 15px 20px; margin-bottom: 20px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
         .nav a {{ color: #1e3a8a; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; }}
         .nav a:hover {{ background: #e0f2fe; }}
         .nav a.active {{ background: #06b6d4; color: white; }}
-        .hero-note {{ background:white; border-radius:16px; padding:22px; margin-bottom:22px; box-shadow:0 10px 28px rgba(0,0,0,0.10); }}
-        .hero-note h2 {{ color:#1e3a8a; margin-bottom:8px; }}
+        .card-shell {{ background:white; border-radius:16px; padding:40px; box-shadow:0 8px 30px rgba(0,0,0,0.12); }}
+        .hero-note {{ background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:16px; margin-bottom:24px; }}
+        .hero-note h2 {{ color:#1e3a8a; margin-bottom:8px; font-size:1.15rem; }}
         .hero-note p {{ color:#475569; line-height:1.6; }}
         .hero-actions {{ display:flex; gap:12px; flex-wrap:wrap; margin-top:16px; }}
         .hero-actions a {{ text-decoration:none; border-radius:10px; padding:12px 16px; font-weight:700; }}
         .hero-actions .primary {{ background:#06b6d4; color:white; }}
         .hero-actions .secondary {{ background:#eff6ff; color:#1e3a8a; }}
-        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 24px; }}
-        .stat-card {{ background: white; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.10); }}
+        .stats {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 24px; }}
+        .stat-card {{ background: #f8fafc; border:1px solid #e2e8f0; border-radius: 14px; padding: 22px; text-align: center; }}
         .stat-card .number {{ font-size: 3em; font-weight: bold; color: #1e3a8a; }}
         .stat-card .label {{ color: #64748b; margin-top: 5px; }}
-        .section {{ background: white; border-radius: 16px; padding: 25px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.10); }}
-        .section h2 {{ color: #1e3a8a; margin-bottom: 15px; font-size: 1.5em; }}
-        .empty {{ color: #94a3b8; text-align: center; padding: 20px; }}
-        .workflow {{ background: #f0f9ff; border-radius: 16px; padding: 20px; margin-bottom: 24px; box-shadow:0 8px 24px rgba(0,0,0,0.08); }}
+        .section {{ background: #ffffff; border-radius: 16px; padding: 0; margin-bottom: 20px; }}
+        .section h2 {{ color: #1e3a8a; margin-bottom: 12px; font-size: 1.45em; }}
+        .section-copy {{ color:#64748b; line-height:1.6; margin-bottom:18px; }}
+        .empty {{ color: #94a3b8; text-align: center; padding: 20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; }}
+        .workflow {{ background: #f0f9ff; border:1px solid #bae6fd; border-radius: 12px; padding: 18px; margin-bottom: 24px; }}
         .workflow h2 {{ color: #1e3a8a; margin-bottom: 15px; }}
         .workflow-steps {{ display: flex; gap: 15px; flex-wrap: wrap; }}
-        .workflow-step {{ background: white; padding: 15px 20px; border-radius: 12px; flex: 1; min-width: 150px; }}
+        .workflow-step {{ background: white; padding: 15px 16px; border-radius: 12px; flex: 1; min-width: 120px; }}
         .workflow-step .step-num {{ background: #06b6d4; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; margin-bottom: 8px; }}
         .workflow-step .step-text {{ color: #1e3a8a; font-weight: 600; }}
-        .biz-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }}
+        .biz-grid {{ display:grid; grid-template-columns:1fr; gap:16px; }}
         .biz-card {{ background:#f8fafc; border-radius:14px; padding:16px; border-left:4px solid #06b6d4; }}
         .biz-card-top {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; }}
         .biz-card h3 {{ color:#1e3a8a; margin-bottom:6px; }}
@@ -1972,97 +1974,111 @@ async def ops_dashboard():
         .list-row span {{ color:#94a3b8; white-space:nowrap; font-size:0.9em; }}
         .text-link {{ color:#0891b2; text-decoration:none; font-weight:700; }}
         .muted {{ color: #64748b; }}
+        @media (max-width: 720px) {{
+          .container {{ max-width: 100%; }}
+          .card-shell {{ padding: 26px 20px; }}
+          .stats {{ grid-template-columns: 1fr; }}
+          .hero-actions {{ flex-direction: column; }}
+          .hero-actions a {{ text-align:center; }}
+          .biz-card-top, .list-row {{ flex-direction: column; }}
+        }}
       </style>
     </head>
     <body>
       <div class="container">
         <div class="header">
-          <h1>🦞 TradeReply Dashboard</h1>
-          <p>See every signed-up business, what TradeReply has generated, and where each reply is sitting.</p>
+          <h1>🦞 TradeReply</h1>
+          <p>Your operator workspace across all businesses</p>
         </div>
         
         <div class="nav">
           <a href="/ops/dashboard" class="active">Dashboard</a>
           <a href="/submit-review">Submit Review</a>
           <a href="/businesses">Businesses</a>
-          <a href="/onboard">Add Business</a>
+          <a href="/onboard">Setup</a>
         </div>
 
-        <div class="hero-note">
-          <h2>Everything in one place</h2>
-          <p>This is your operator view across all businesses. Use it to see which businesses have signed up, which ones are connected to Google, how many drafts TradeReply has generated, and where approvals or posted replies stand.</p>
-          <div class="hero-actions">
-            <a class="primary" href="/onboard">Add a business</a>
-            <a class="secondary" href="/businesses">Open businesses</a>
-          </div>
-        </div>
-        
-        <div class="stats">
-          <div class="stat-card">
-            <div class="number">{len(businesses)}</div>
-            <div class="label">Businesses</div>
-          </div>
-          <div class="stat-card">
-            <div class="number">{len(pending)}</div>
-            <div class="label">Pending Approvals</div>
-          </div>
-          <div class="stat-card">
-            <div class="number">{len(ready)}</div>
-            <div class="label">Ready to Post</div>
-          </div>
-          <div class="stat-card">
-            <div class="number">{len(posted)}</div>
-            <div class="label">Responses Posted</div>
-          </div>
-        </div>
-        
-        <div class="workflow">
-          <h2>How the automated flow works</h2>
-          <div class="workflow-steps">
-            <div class="workflow-step">
-              <div class="step-num">1</div>
-              <div class="step-text">New Google review detected</div>
-            </div>
-            <div class="workflow-step">
-              <div class="step-num">2</div>
-              <div class="step-text">AI drafts a reply</div>
-            </div>
-            <div class="workflow-step">
-              <div class="step-num">3</div>
-              <div class="step-text">Owner receives SMS</div>
-            </div>
-            <div class="workflow-step">
-              <div class="step-num">4</div>
-              <div class="step-text">Reply YES or NO</div>
-            </div>
-            <div class="workflow-step">
-              <div class="step-num">5</div>
-              <div class="step-text">Approved replies post automatically</div>
+        <div class="card-shell">
+          <div class="hero-note">
+            <h2>Everything in one place</h2>
+            <p>This is your operator view across all businesses. Use it to see which businesses have signed up, which ones are connected to Google, how many drafts TradeReply has generated, and where approvals or posted replies stand.</p>
+            <div class="hero-actions">
+              <a class="primary" href="/onboard">Add a business</a>
+              <a class="secondary" href="/businesses">Open businesses</a>
             </div>
           </div>
-        </div>
+          
+          <div class="stats">
+            <div class="stat-card">
+              <div class="number">{len(businesses)}</div>
+              <div class="label">Businesses</div>
+            </div>
+            <div class="stat-card">
+              <div class="number">{len(pending)}</div>
+              <div class="label">Pending approvals</div>
+            </div>
+            <div class="stat-card">
+              <div class="number">{len(ready)}</div>
+              <div class="label">Ready to post</div>
+            </div>
+            <div class="stat-card">
+              <div class="number">{len(posted)}</div>
+              <div class="label">Responses posted</div>
+            </div>
+          </div>
+          
+          <div class="workflow">
+            <h2>How the automated flow works</h2>
+            <div class="workflow-steps">
+              <div class="workflow-step">
+                <div class="step-num">1</div>
+                <div class="step-text">New Google review detected</div>
+              </div>
+              <div class="workflow-step">
+                <div class="step-num">2</div>
+                <div class="step-text">AI drafts a reply</div>
+              </div>
+              <div class="workflow-step">
+                <div class="step-num">3</div>
+                <div class="step-text">Owner receives SMS</div>
+              </div>
+              <div class="workflow-step">
+                <div class="step-num">4</div>
+                <div class="step-text">Reply YES or NO</div>
+              </div>
+              <div class="workflow-step">
+                <div class="step-num">5</div>
+                <div class="step-text">Approved replies post automatically</div>
+              </div>
+            </div>
+          </div>
 
-        <div class="section">
-          <h2>🏢 Business overview</h2>
-          <div class="biz-grid">{business_summary_html}</div>
+          <div class="section">
+            <h2>🏢 Business overview</h2>
+            <p class="section-copy">Every signed-up business gets its own isolated workspace. Use these cards to jump into a single business and inspect its replies.</p>
+            <div class="biz-grid">{business_summary_html}</div>
+          </div>
+          
+          <div class="section">
+            <h2>⏳ Pending approvals ({len(pending)})</h2>
+            <p class="section-copy">These are the replies still waiting on a YES, NO, or edit from the business owner.</p>
+            {render_list(pending, 'pending') if pending else '<div class="empty">No pending approvals</div>'}
+          </div>
+          
+          <div class="section">
+            <h2>✅ Approved drafts still waiting to post ({len(ready)})</h2>
+            <p class="section-copy">If Google posting is delayed or requires follow-up, those replies appear here.</p>
+            {render_list(ready, 'ready') if ready else '<div class="empty">No responses ready to post</div>'}
+          </div>
+          
+          <div class="section">
+            <h2>📤 Posted responses ({len(posted)})</h2>
+            <p class="section-copy">A quick running list of the latest replies that have successfully gone live.</p>
+            {render_list(posted, 'posted') if posted else '<div class="empty">No responses posted yet</div>'}
+          </div>
+          
+          {f'<div class="section"><h2>❌ Failed posts ({len(failed)})</h2><p class="section-copy">These replies need a closer look before they can be posted.</p>{render_list(failed, "failed")}</div>' if failed else ''}
         </div>
-        
-        <div class="section">
-          <h2>⏳ Pending approvals ({len(pending)})</h2>
-          {render_list(pending, 'pending') if pending else '<div class="empty">No pending approvals</div>'}
-        </div>
-        
-        <div class="section">
-          <h2>✅ Approved drafts still waiting to post ({len(ready)})</h2>
-          {render_list(ready, 'ready') if ready else '<div class="empty">No responses ready to post</div>'}
-        </div>
-        
-        <div class="section">
-          <h2>📤 Posted responses ({len(posted)})</h2>
-          {render_list(posted, 'posted') if posted else '<div class="empty">No responses posted yet</div>'}
-        </div>
-        
-        {f'<div class="section"><h2>❌ Failed posts ({len(failed)})</h2>{render_list(failed, "failed")}</div>' if failed else ''}
       </div>
     </body>
     </html>
